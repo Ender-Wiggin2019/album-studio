@@ -1,0 +1,45 @@
+appId: com.albumstudio.desktop
+productName: 电子相册工作室
+directories:
+  buildResources: build
+asar: true
+electronFuses:
+  runAsNode: false
+  enableCookieEncryption: true
+  enableNodeOptionsEnvironmentVariable: false
+  enableNodeCliInspectArguments: false
+  enableEmbeddedAsarIntegrityValidation: true
+  onlyLoadAppFromAsar: true
+  grantFileProtocolExtraPrivileges: false
+files:
+  - '!**/.vscode/*'
+  - '!src/*'
+  - '!electron.vite.config.{js,ts,mjs,cjs}'
+  - '!{.eslintcache,eslint.config.mjs,.prettierignore,.prettierrc.yaml,dev-app-update.yml,CHANGELOG.md,README.md}'
+  - '!{.env,.env.*,.npmrc,pnpm-lock.yaml}'
+  - '!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}'
+asarUnpack:
+  - resources/**
+win:
+  executableName: album-studio
+  target:
+    - nsis
+    - portable
+nsis:
+  artifactName: ${name}-${version}-setup.${ext}
+  shortcutName: ${productName}
+  uninstallDisplayName: ${productName}
+  createDesktopShortcut: always
+mac:
+  identity: '-'
+  hardenedRuntime: false
+  entitlementsInherit: build/entitlements.mac.plist
+  category: public.app-category.photography
+  target:
+    - target: dmg
+      arch:
+        - universal
+  notarize: false
+dmg:
+  artifactName: ${name}-${version}.${ext}
+npmRebuild: false

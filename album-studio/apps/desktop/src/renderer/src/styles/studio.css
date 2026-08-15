@@ -1,0 +1,311 @@
+.studio-header {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) auto minmax(250px, 1fr);
+  align-items: center;
+  min-height: 60px;
+  flex-shrink: 0;
+  gap: 12px;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--background) 96%, transparent);
+  padding: 8px 16px;
+}
+
+.save-indicator {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 2px;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  font-size: 11px;
+}
+
+.workspace-nav {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  border-radius: 8px;
+  background: var(--muted);
+  padding: 3px;
+}
+
+.workspace-nav button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  padding: 7px 14px;
+  color: var(--muted-foreground);
+  font-size: 13px;
+  font-weight: 600;
+  outline: none;
+}
+
+.workspace-nav button svg {
+  width: 15px;
+  height: 15px;
+}
+.workspace-nav button:hover {
+  color: var(--foreground);
+}
+.workspace-nav button:focus-visible {
+  box-shadow: 0 0 0 2px var(--ring);
+}
+.workspace-nav button[data-active='true'] {
+  background: var(--background);
+  color: var(--foreground);
+  box-shadow: 0 1px 3px rgb(15 23 42 / 10%);
+}
+
+.studio-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+.history-actions {
+  display: flex;
+  align-items: center;
+  margin-right: 4px;
+}
+
+.editor-layout {
+  display: grid;
+  grid-template-columns: 224px minmax(0, 1fr) 320px;
+  grid-template-areas: 'rail canvas inspector';
+  overflow: hidden;
+}
+
+.page-rail {
+  grid-area: rail;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.page-rail-heading,
+.inspector-heading {
+  display: flex;
+  min-height: 52px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--border);
+  padding: 0 16px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.page-rail-heading span:last-child {
+  color: var(--muted-foreground);
+  font-family: ui-monospace, monospace;
+}
+.page-rail-list {
+  display: grid;
+  min-height: 0;
+  gap: 14px;
+  overflow-y: auto;
+  padding: 14px;
+}
+.page-rail-item {
+  display: grid;
+  min-width: 0;
+  gap: 7px;
+}
+.page-thumbnail {
+  width: 100%;
+  overflow: hidden;
+  border: 2px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  padding: 0;
+  box-shadow: 0 3px 12px rgb(15 23 42 / 10%);
+}
+.page-thumbnail-selected {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary) 18%, transparent);
+}
+.page-thumbnail .album-page {
+  box-shadow: none;
+}
+
+.canvas-workspace {
+  grid-area: canvas;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+  background: #252a31;
+}
+.canvas-toolbar {
+  display: flex;
+  min-height: 52px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid rgb(255 255 255 / 7%);
+  background: #20242a;
+  padding: 0 14px;
+  color: #c4cad3;
+}
+.canvas-toolbar button {
+  color: #d7dce3;
+}
+.canvas-toolbar button:hover {
+  background: rgb(255 255 255 / 8%);
+  color: white;
+}
+.canvas-toolbar .mobile-inspector-trigger {
+  background: var(--background);
+  color: var(--foreground);
+}
+.canvas-toolbar .mobile-inspector-trigger:hover {
+  background: var(--accent);
+  color: var(--accent-foreground);
+}
+.canvas-scroll {
+  position: relative;
+  display: grid;
+  min-height: 0;
+  flex: 1;
+  place-items: center;
+  overflow: auto;
+  padding: clamp(22px, 4vw, 58px);
+}
+.canvas-sheet {
+  min-width: 440px;
+  max-width: 1100px;
+  transition: width 160ms ease;
+}
+.canvas-empty-action {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  z-index: 30;
+  width: 210px;
+  transform: translate(-50%, -50%);
+  border-radius: 10px;
+  background: rgb(255 255 255 / 94%);
+  padding: 18px;
+  text-align: center;
+  color: #1d2229;
+  box-shadow: 0 14px 40px rgb(0 0 0 / 18%);
+}
+
+.inspector {
+  grid-area: inspector;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+}
+.inspector-body {
+  min-height: 0;
+  flex: 1;
+  overflow-y: auto;
+  padding: 18px;
+}
+.inspector-embedded {
+  width: 100%;
+  height: 100%;
+  border: 0;
+}
+.inspector-embedded .inspector-heading {
+  display: none;
+}
+.mobile-inspector-trigger {
+  display: none;
+}
+
+@media (max-width: 1279px) {
+  .editor-layout {
+    grid-template-columns: 152px minmax(0, 1fr);
+    grid-template-areas: 'rail canvas';
+  }
+  .editor-layout > .inspector:not(.inspector-embedded) {
+    display: none;
+  }
+  .mobile-inspector-trigger {
+    display: inline-flex;
+  }
+  .page-rail-list {
+    padding: 10px;
+    gap: 11px;
+  }
+  .page-rail-heading {
+    padding: 0 12px;
+  }
+}
+
+@media (max-width: 959px) {
+  .studio-header {
+    grid-template-columns: minmax(150px, 1fr) auto;
+    grid-template-areas:
+      'identity actions'
+      'nav nav';
+  }
+  .studio-identity {
+    grid-area: identity;
+  }
+  .workspace-nav {
+    grid-area: nav;
+    justify-self: center;
+    border: 1px solid var(--border);
+  }
+  .studio-actions {
+    grid-area: actions;
+  }
+  .history-actions,
+  .action-label {
+    display: none;
+  }
+  .editor-layout {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) 122px;
+    grid-template-areas: 'canvas' 'rail';
+  }
+  .page-rail {
+    flex-direction: row;
+    border-top: 1px solid var(--border);
+    border-right: 0;
+  }
+  .page-rail-heading {
+    display: none;
+  }
+  .page-rail-list {
+    display: flex;
+    width: 100%;
+    gap: 10px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding: 9px 12px 14px;
+  }
+  .page-rail-item {
+    width: 104px;
+    flex: 0 0 104px;
+    gap: 4px;
+  }
+  .page-rail-list > button {
+    width: 104px;
+    flex: 0 0 104px;
+    align-self: center;
+  }
+  .canvas-toolbar > span {
+    display: none;
+  }
+  .canvas-toolbar {
+    justify-content: flex-end;
+  }
+  .canvas-scroll {
+    padding: 24px 18px;
+  }
+  .canvas-sheet {
+    min-width: 380px;
+  }
+}

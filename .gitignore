@@ -1,0 +1,28 @@
+.DS_Store
+
+# The legacy album contains private, very large Base64 photo data and remains a local read-only fixture.
+/原始项目参考/
+
+# JavaScript / Electron outputs
+node_modules/
+dist/
+out/
+release/
+coverage/
+playwright-report/
+test-results/
+*.log
+
+# User-created album projects and local QA artifacts
+*.album-project/
+/tmp/
+/output/
+
+# Local environment and signing material
+.env
+.env.*
+!.env.example
+*.p12
+*.pfx
+*.cer
+*.mobileprovision

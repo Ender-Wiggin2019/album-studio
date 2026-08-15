@@ -1,0 +1,28 @@
+{
+  "name": "album-studio-workspace",
+  "version": "0.1.0",
+  "private": true,
+  "description": "电子相册工作室跨平台桌面应用",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "check:env": "node scripts/check-env.mjs",
+    "dev": "npm run dev --workspace album-studio-desktop",
+    "start": "npm run start --workspace album-studio-desktop",
+    "build": "npm run build --workspace album-studio-desktop",
+    "check": "npm run lint --workspace album-studio-desktop && npm run typecheck --workspace album-studio-desktop && npm test && npm run build",
+    "lint": "npm run lint --workspace album-studio-desktop",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspace @album-studio/common && npm run test --workspace album-studio-desktop",
+    "test:e2e": "npm run test:e2e --workspace album-studio-desktop",
+    "test:e2e:large": "npm run test:e2e:large --workspace album-studio-desktop",
+    "package:unpack": "npm run build:unpack --workspace album-studio-desktop",
+    "package:win": "npm run build:win --workspace album-studio-desktop",
+    "package:mac": "npm run build:mac --workspace album-studio-desktop"
+  }
+}

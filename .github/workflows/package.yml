@@ -1,0 +1,41 @@
+name: Package desktop apps
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            command: npm run package:win
+            artifact: album-studio-windows
+          - os: macos-latest
+            command: npm run package:mac
+            artifact: album-studio-macos
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: album-studio
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: album-studio/.nvmrc
+          cache: npm
+          cache-dependency-path: album-studio/package-lock.json
+      - run: npm ci
+      - run: npm run check
+      - run: ${{ matrix.command }}
+      - if: runner.os == 'macOS'
+        run: npm run verify:package:mac --workspace album-studio-desktop
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.artifact }}
+          path: album-studio/apps/desktop/dist/**
+          if-no-files-found: error
