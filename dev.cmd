@@ -10,6 +10,14 @@ if errorlevel 1 (
   exit /b 1
 )
 
+where npm.cmd >nul 2>nul
+if errorlevel 1 (
+  echo [电子相册工作室] 未找到 npm。请重新安装 Node.js 22 LTS。
+  echo https://nodejs.org/
+  pause
+  exit /b 1
+)
+
 node "%~dp0album-studio\scripts\dev.mjs"
 if errorlevel 1 (
   echo.

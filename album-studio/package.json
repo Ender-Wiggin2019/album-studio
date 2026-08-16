@@ -13,16 +13,22 @@
   "scripts": {
     "check:env": "node scripts/check-env.mjs",
     "dev": "npm run dev --workspace album-studio-desktop",
+    "dev:web": "npm run dev --workspace album-studio-web",
     "start": "npm run start --workspace album-studio-desktop",
     "build": "npm run build --workspace album-studio-desktop",
-    "check": "npm run lint --workspace album-studio-desktop && npm run typecheck --workspace album-studio-desktop && npm test && npm run build",
-    "lint": "npm run lint --workspace album-studio-desktop",
+    "build:web": "npm run build --workspace album-studio-web",
+    "build:all": "npm run build && npm run build:web",
+    "check": "npm run check:env && npm run lint && npm run typecheck && npm test && npm run build:all && npm run test:dev-smoke && npm run test:e2e:web",
+    "lint": "npm run lint --workspace album-studio-desktop && eslint --config apps/desktop/eslint.config.mjs apps/web packages/common packages/studio",
     "typecheck": "npm run typecheck --workspaces --if-present",
-    "test": "npm run test --workspace @album-studio/common && npm run test --workspace album-studio-desktop",
+    "test": "npm run test --workspace @album-studio/common && npm run test --workspace @album-studio/studio && npm run test --workspace album-studio-desktop",
+    "test:dev-smoke": "npm run test:dev-smoke --workspace album-studio-desktop",
     "test:e2e": "npm run test:e2e --workspace album-studio-desktop",
-    "test:e2e:large": "npm run test:e2e:large --workspace album-studio-desktop",
+    "test:e2e:web": "npm run test:e2e --workspace album-studio-web",
+    "test:e2e:all": "npm run test:e2e && npm run test:e2e:web",
     "package:unpack": "npm run build:unpack --workspace album-studio-desktop",
     "package:win": "npm run build:win --workspace album-studio-desktop",
-    "package:mac": "npm run build:mac --workspace album-studio-desktop"
+    "package:mac": "npm run build:mac --workspace album-studio-desktop",
+    "verify:package": "npm run verify:package --workspace album-studio-desktop"
   }
 }

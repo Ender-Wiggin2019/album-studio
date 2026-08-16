@@ -1,0 +1,218 @@
+.album-document {
+  --album-canvas: #e7ded1;
+  --album-page: #fff8ec;
+  --album-page-alt: #ead8be;
+  --album-ink: #231f1a;
+  --album-muted: #73695d;
+  --album-rule: #ccbca6;
+  --album-accent: #a84835;
+  --album-accent-alt: #2e6f6c;
+  color: var(--album-ink);
+}
+
+.album-document[data-album-theme='postcard'] {
+  --album-canvas: #ddedef;
+  --album-page: #fffdf7;
+  --album-page-alt: #d7eef0;
+  --album-ink: #17333c;
+  --album-muted: #5f7175;
+  --album-rule: #b8d4d7;
+  --album-accent: #e9654c;
+  --album-accent-alt: #127c8a;
+}
+
+.album-document[data-album-theme='film'] {
+  --album-canvas: #141512;
+  --album-page: #f6edd8;
+  --album-page-alt: #20211d;
+  --album-ink: #181915;
+  --album-muted: #6e6a5f;
+  --album-rule: #c8bea8;
+  --album-accent: #c94b38;
+  --album-accent-alt: #9cb57b;
+}
+
+.album-page {
+  position: relative;
+  width: 100%;
+  overflow: hidden;
+  container-type: inline-size;
+  background: var(--album-page);
+  color: var(--album-ink);
+  box-shadow: 0 20px 60px rgb(8 12 18 / 22%);
+  font-family: system-ui, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+}
+
+.album-block {
+  position: absolute;
+  z-index: 1;
+  box-sizing: border-box;
+  transform-origin: center center;
+  touch-action: none;
+}
+
+.album-image-block-content,
+.album-rich-text-block,
+.album-decoration-block {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+.album-rich-text-block {
+  overflow: hidden;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.album-rich-text-paragraph {
+  min-height: 1em;
+  margin: 0;
+}
+
+.album-rich-text-list {
+  margin: 0;
+  padding-inline-start: 1.35em;
+}
+
+.album-rich-text-list li {
+  padding-inline-start: 0.15em;
+}
+
+.album-decoration-block {
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+}
+
+.album-decoration-icon,
+.album-decoration-sticker {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.album-decoration-sticker {
+  object-fit: contain;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+.album-page::before,
+.album-page::after {
+  content: '';
+  position: absolute;
+  pointer-events: none;
+  z-index: 20;
+}
+
+[data-album-theme='journal'] .album-page {
+  background-color: var(--album-page);
+  background-image:
+    linear-gradient(90deg, rgb(111 75 44 / 4%) 1px, transparent 1px),
+    linear-gradient(rgb(111 75 44 / 3%) 1px, transparent 1px);
+  background-size: 22px 22px;
+}
+
+[data-album-theme='journal'] .album-page::before {
+  inset: 3.8% auto 3.8% 2.2%;
+  width: 1px;
+  background: var(--album-rule);
+  box-shadow: 7px 0 0 color-mix(in srgb, var(--album-rule) 45%, transparent);
+}
+
+[data-album-theme='postcard'] .album-page::before {
+  right: 3.2%;
+  top: 4.5%;
+  width: 12%;
+  aspect-ratio: 1;
+  border: 1px dashed var(--album-accent);
+  border-radius: 50%;
+  opacity: 0.7;
+}
+
+[data-album-theme='postcard'] .album-page::after {
+  right: 4%;
+  bottom: 7%;
+  width: 29%;
+  height: 15%;
+  background: repeating-linear-gradient(to bottom, transparent 0 18%, var(--album-rule) 19% 20%);
+  opacity: 0.55;
+}
+
+[data-album-theme='film'] .album-page {
+  border: clamp(7px, 1.25cqw, 18px) solid var(--album-page-alt);
+}
+
+[data-album-theme='film'] .album-page::before {
+  inset: 0.5% 2%;
+  background: repeating-linear-gradient(to right, #050505 0 1.4%, transparent 1.4% 4%);
+  height: 1.4%;
+  opacity: 0.82;
+}
+
+[data-album-theme='film'] .album-page::after {
+  content: 'ALBUM STUDIO · CONTACT 001';
+  left: 2.5%;
+  bottom: 0.5%;
+  color: #d6cbae;
+  font-family: ui-monospace, monospace;
+  font-size: clamp(5px, 0.65cqw, 10px);
+  letter-spacing: 0.16em;
+}
+
+.album-safe-area {
+  position: absolute;
+  inset: 3%;
+  z-index: 25;
+  border: 1px dashed color-mix(in srgb, var(--album-accent) 45%, transparent);
+  pointer-events: none;
+}
+
+.print-book {
+  display: none;
+}
+
+@media print {
+  [data-slot='dialog-overlay'],
+  [data-slot='dialog-content'],
+  [data-sonner-toaster] {
+    display: none !important;
+  }
+
+  html,
+  body,
+  #root {
+    width: auto;
+    height: auto;
+    overflow: visible;
+    background: white;
+  }
+
+  .app-shell {
+    display: none !important;
+  }
+
+  .print-book {
+    display: block;
+  }
+
+  .print-page {
+    width: var(--print-page-width);
+    height: var(--print-page-height);
+    break-after: page;
+    page-break-after: always;
+    overflow: hidden;
+  }
+
+  .print-page:last-child {
+    break-after: auto;
+    page-break-after: auto;
+  }
+
+  .print-page .album-page {
+    width: var(--print-page-width);
+    height: var(--print-page-height);
+    box-shadow: none;
+  }
+}

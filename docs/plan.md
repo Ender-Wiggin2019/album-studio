@@ -1,187 +1,188 @@
-# 电子相册工程化重构计划
+# 电子相册工作室实施基线
 
-> 状态：已实施并完成首版验收
+> 状态：当前架构已落地，本文用于定义继续迭代时不可破坏的边界
 >
 > 实施目录：`album-studio/`
->
-> 更新日期：2026-08-15
+> 更新日期：2026-08-16
 
-## 1. 目标与成功定义
+## 1. 产品目标
 
-将 `原始项目参考/` 中的单 HTML 相册重构为离线优先的 Windows/macOS 桌面应用，保留旧相册迁移能力，并建立可维护、可测试、可打包的现代工程。
+电子相册工作室是一套离线优先的相册排版工具，面向不熟悉命令行的用户，同时提供完整桌面端和轻量浏览器端：
 
-首版成功标准：
+- macOS、Windows 用户可以双击启动器进入桌面应用。
+- 开发者可以在浏览器中快速调试共享界面与业务逻辑。
+- 图片、富文本、Icon 和贴纸都作为 Block，像幻灯片元素一样自由拖动、缩放、旋转和调整跨类型图层。
+- 图片编辑支持裁剪、翻转、旋转、滤镜、美化与蒙版，且始终保留原图。
+- 项目可自动保存、撤销/重做，并按创建时选择的 A4 横向、12 寸方形或 16:9 尺寸输出。
+- 数据、页面、组件、平台能力与文件系统清晰分层，便于继续维护和扩展。
 
-- 非技术用户可以通过 Electron 界面完成“项目 → 素材库 → 选择素材 → 排版/编辑 → 预览/导出”。
-- 支持图片或文件夹导入，源文件不被修改，原图复制进项目目录。
-- 支持封面、1–6 图版式、自动分页、页面/照片排序和非破坏性图片编辑。
-- 支持 3 套项目级主题，预览与 PDF 共用同一页面模型。
-- 可导出含封面的 A4 横向 PDF。
-- 可迁移旧 schema 2/4 JSON 和自包含 HTML，不改写源文件。
-- macOS 可生成 universal DMG；Windows 可生成 x64 NSIS 和 portable 产物，并有双平台原生 CI 构建矩阵。
-- macOS/Windows 均有双击式开发启动和打包脚本，并提供项目专用 Skill。
+`原始项目参考/` 只提供产品需求参考，不属于当前运行时、数据格式或接口的一部分。
 
-## 2. 已确认范围与默认值
+## 2. 成功标准
 
-- Git 根目录：当前工作区。
-- 新应用目录：`album-studio/`。
-- 项目文件夹扩展名：`.album-project`。
-- PDF：A4 横向，封面为第 1 页。
-- 素材策略：导入时复制原图，按内容 SHA-256 去重，编辑参数与原图分离。
-- 旧数据：首版支持 JSON 和自包含 HTML，不试图原样保留旧 HTML 的运行时脚本。
+| 领域     | 验收标准                                                                        |
+| -------- | ------------------------------------------------------------------------------- |
+| 启动     | macOS 与 Windows 桌面启动器无需用户输入命令；浏览器启动器自动打开页面           |
+| 开发体验 | React/CSS 修改自动热更新，CSS HMR 不触发整页重载                                |
+| 数据     | 只接受唯一的 `AlbumDocument` schema v2，不进行隐式修补、迁移或格式猜测          |
+| 编辑     | 自由画布支持拖动、缩放、旋转、吸附、层级、复制、删除和键盘微调                  |
+| 图片     | 原图内容寻址去重；预览/打印衍生图可重建；裁剪与效果为非破坏性参数               |
+| 桌面     | 项目目录可整体备份与移动；自动保存可靠；原生 PDF 导出成功                       |
+| 浏览器   | OPFS 项目可创建、导入、编辑、刷新恢复，并可调用系统打印                         |
+| 打包     | macOS universal DMG 与 Windows x64 NSIS/portable 均由各自原生环境构建并运行验证 |
+| 安全     | renderer 无 Node 权限；IPC、CSP、协议、路径和 Electron fuses 均有明确边界       |
 
-首版不包含：云同步、多人协作、移动端、任意画布/图层系统、视频、内建自动更新、商店签名和公证。
+## 3. 范围与非目标
 
-## 3. 原项目审计结论
+当前范围包括：
 
-`原始项目参考/` 的主要产物是单页 HTML 和内嵌 Base64 图片的 JSON/HTML，通过 Windows 批处理启动本地服务。它已包含照片导入、分页、基础排版和导出思路，但有以下工程风险：
+- 封面与内容页、3 套主题、3 种成品尺寸、7 种纯图片布局和 3 种图文混合布局。
+- 项目素材与文字/Icon/贴纸组件来源、右侧常驻装帧托盘和受限富文本编辑。
+- 图片/文件夹导入、自由排版、裁剪、8 类图像参数、预设滤镜和 7 种蒙版。
+- 桌面项目目录、浏览器 OPFS、最近项目、自动保存和有界撤销/重做。
+- 桌面 PDF、浏览器打印、响应式工作区和无障碍基础交互。
+- macOS/Windows 原生打包、开发 smoke、浏览器/桌面 E2E 和打包 smoke。
 
-- UI、数据、文件 I/O 和打印逻辑耦合在单文件中。
-- Base64 数据导致文件巨大、内存峰值高且无法复用缩略图。
-- 缺少 schema 校验、原子保存、备份、自动化测试和跨平台发布链路。
-- 文件系统权限边界不适合直接搬进 Electron renderer。
+当前不包含云同步、多人协作、移动端原生应用、视频、账号体系、自动更新、正式代码签名与公证。浏览器端也不承诺跨浏览器持久保存或读取桌面 `.album-project` 目录。
 
-重构因此采用独立项目模型、内容寻址素材、窄 IPC 契约和单一页面渲染源。
-
-## 4. 产品流程
-
-### 4.1 项目首页
-
-- 新建项目：选择保存位置、名称和初始主题。
-- 打开项目：选择 `.album-project` 目录。
-- 最近项目：打开已知项目；目录移动后可重新定位。
-- 迁移旧相册：选择 JSON 或 HTML，预检后新建项目并复制素材。
-
-### 4.2 工作区
-
-- 顶部：项目名、保存状态、预览和导出。
-- 素材库：图片/文件夹导入、多选、选中素材加入当前页或新页。
-- 排版：封面与页面缩略导航、1–6 图模板、自动分页、页面与照片的明确移动按钮。
-- 属性面板：主题、版式、照片、说明和页文字。窄视口下以可关闭面板展示。
-- 照片编辑器：裁剪、缩放、位移、旋转、翻转、明亮/对比/饱和度和 6 种蒙版，操作均为非破坏性。
-
-## 5. 技术架构
+## 4. 分层架构
 
 ```text
 album-studio/
-├── apps/desktop/
-│   ├── src/main/       Electron 主进程、存储、素材、迁移、PDF
-│   ├── src/preload/    经校验的窄 IPC API
-│   └── src/renderer/   React、shadcn/ui、Tailwind、Zustand
-├── packages/common/        schema、IPC 契约、布局与迁移纯函数
-└── scripts/                环境检查与跨平台开发入口
+├── apps/
+│   ├── desktop/       Electron main/preload 与桌面 StudioPlatform 适配器
+│   └── web/           Vite 浏览器入口与 OPFS StudioPlatform 适配器
+├── packages/
+│   ├── common/        AlbumDocument、命令、模板、裁剪/效果、IPC 契约
+│   └── studio/        共享 React 产品界面与状态编排
+└── scripts/           环境检查与开发入口
 ```
 
-核心技术：
+`packages/studio` 继续按以下职责组织：
 
-- Electron 43 + electron-vite 5
-- React 19 + TypeScript 5.9 + Vite 7
-- Tailwind CSS v4 + shadcn/ui/Radix UI
-- Zustand + Zod
-- `react-easy-crop` 用于裁剪交互
-- Vitest + Testing Library + Playwright Electron
-- electron-builder 用于 Windows/macOS 打包
+- `app/`：应用装配、路由级状态和平台注入。
+- `pages/`：首页、工作区等页面组合。
+- `features/`：画布、照片编辑、素材、预览、导出等业务能力。
+- `components/ui/`：无业务语义的基础组件。
+- `shared/`：跨功能的 hooks、样式和小型工具。
 
-### 5.1 进程边界
+桌面端和浏览器端只负责组合根与平台能力，不复制相册业务逻辑。所有跨端数据结构和命令放在 `packages/common`，所有共享产品 UI 放在 `packages/studio`。
 
-- 主进程是唯一可访问文件系统、系统对话框和 `printToPDF` 的进程。
-- renderer 不启用 Node integration，且使用 context isolation。
-- preload 不暴露 `ipcRenderer` 或任意路径读写，请求和响应通过 Zod 契约校验。
-- 素材通过限定在已打开项目根内的 `album-asset:` 协议访问，拒绝路径穿越和符号链接逃逸。
+## 5. 唯一文档格式
 
-## 6. 项目数据与持久化
+当前持久化格式是严格的 `AlbumDocument` schema v2：
+
+- 项目保存唯一 `PageSpec`，只能是 A4 横向、12 寸方形或 16:9；封面固定为第一且唯一的封面页。
+- 封面和内容页都持有单一有序 `Block[]`；ImageBlock、RichTextBlock 与 DecorationBlock 按数组顺序共享图层。
+- ImageBlock 保存归一化几何、裁剪、翻转、效果、蒙版与内部说明；RichTextBlock 保存受限富文本文档；DecorationBlock 引用内置稳定资源 ID。
+- 主题仅为 `journal`、`postcard`、`film`。
+- 页面布局以 typed slots 重排数量匹配的图片和文字；用户自由变换参与布局的 Block 后清除 `layoutId`，装饰保持不变。
+- 所有编辑通过 `AlbumCommand` 完成，并产生 Immer patches；撤销/重做历史最多保留 100 步。
+- 每次成功命令都会递增 revision；保存端拒绝过期 revision 覆盖新数据。
+
+不在 schema 入口添加容错字段、格式猜测或隐藏转换。格式升级必须单独设计新版本并由明确产品决策批准。
+
+## 6. 核心产品流程
+
+### 6.1 桌面端
+
+1. 选择成品尺寸和主题，新建或打开 `.album-project` 项目目录。
+2. 导入 JPEG、PNG、WebP 或 AVIF 图片/文件夹。
+3. 从常驻素材/组件面板点击或拖入 Block，选择页面布局快速起稿，再在自由画布上精调。
+4. 打开照片编辑器完成裁剪、旋转、翻转、滤镜和蒙版。
+5. 自动保存写入项目目录；错误时显示原因与重试入口。
+6. 预览整册并按项目 PageSpec 导出 PDF。
+
+### 6.2 浏览器端
+
+1. 在当前站点来源的 OPFS 中创建项目。
+2. 导入图片或文件夹，使用与桌面端相同的页面、画布和照片编辑能力。
+3. 自动保存到 OPFS，刷新后从最近项目恢复。
+4. 通过浏览器打印对话框输出 PDF 或纸张。
+
+浏览器会请求持久存储，但浏览器仍可能回收空间；清除站点数据会删除项目。因此浏览器端适合调试和轻量使用，不替代桌面项目目录的可见备份能力。
+
+## 7. 自由画布与图片处理
+
+- `react-moveable` 负责拖动、8 个缩放手柄、旋转与吸附。
+- 手势进行时只更新 DOM 预览；结束时提交一个 `set-block-transform` 命令，避免高频写入状态和历史。
+- 吸附来源包括页面参考线、其他 Block 边缘/中心、间距与常用旋转角度。
+- `react-easy-crop` 负责裁剪视口；编辑草稿只有在“应用”时才提交一次命令。
+- 效果包含亮度、对比度、饱和度、色相、棕褐、灰度、模糊和暗角，并提供 8 个组合预设。
+- 裁剪、旋转、翻转、效果和蒙版都保存在 ImageBlock 参数中，不覆盖原图。
+- 编辑画布、页面缩略图、整册预览和打印统一复用 `AlbumPageView` / `BlockView`，避免三类 Block 的表现漂移。
+
+## 8. 文件系统与性能
+
+桌面项目目录：
 
 ```text
-我的旅行.album-project/
-├── manifest.json              # 版本化结构数据，不含 Base64
+项目名.album-project/
+├── manifest.json
 ├── assets/
-│   ├── original/                # 按内容 hash 存放的原图
-│   ├── previews/                # 编辑界面缩略图
-│   └── print/                   # PDF 高清预览图
-└── backups/                   # 有界限的 manifest 备份
+│   ├── original/<sha256>.<ext>
+│   └── cache/<pipeline-version>/<sha256>/<variant>-<size>.webp
+└── backups/manifest-r<revision>-<timestamp>.json
 ```
 
-- `manifest.json` 存储 Project、Asset、Page、PhotoElement、TextStyle、Theme 和非破坏性参数。
-- 写入采用同目录临时文件、文件 `fsync`、原子替换和目录同步；备份按修改时间轮转。
-- renderer 自动保存并提供有界撤销/重做；窗口关闭前会先提交当前聚焦的表单值并等待保存确认。
-- 图片导入时先校验实际解码结果，再写入原图、UI 预览图和打印预览图。
-- 原图缺失时可重新选择文件；仅当 SHA-256 与记录一致时才恢复，避免错图。
+- 原图通过流式复制、SHA-256 去重、临时文件 `fsync` 和原子改名写入，绝不原地修改。
+- `sharp` 解码 JPEG/PNG/WebP/AVIF，自动处理 EXIF 方向，并拒绝超过 8000 万像素的图片。
+- 缩略图为 480×360，预览图为 1600×1200；打印图按页面占比生成并受尺寸上限保护。
+- 衍生图并发限制为 2；缓存版本变化时可以安全重建。
+- 最近 5 份 manifest 自动备份；项目与素材路径都经过 realpath、符号链接和根目录边界检查。
+- `album-asset:` 只接受安全的资源标识、版本和质量参数，并通过 Electron 网络层流式读取。
 
-## 7. 渲染、主题和 PDF
+浏览器端使用 OPFS 保存相同语义的数据，使用 `createImageBitmap`、`pica` 和 `hash-wasm` 完成解码、缩放与哈希，并对 Blob URL 做引用计数和及时回收。
 
-编辑画布、页面缩略图、整册预览和打印树均消费同一份 Page/Element 数据与布局函数；编辑模式只额外叠加选中框和空槽。
+## 9. 启动、构建与安全
 
-主题为项目级：
+| 场景               | 简单入口                | 命令入口              |
+| ------------------ | ----------------------- | --------------------- |
+| macOS 桌面开发     | `dev.command`           | `npm run dev`         |
+| Windows 桌面开发   | `dev.cmd`               | `npm run dev`         |
+| macOS 浏览器开发   | `dev-web.command`       | `npm run dev:web`     |
+| Windows 浏览器开发 | `dev-web.cmd`           | `npm run dev:web`     |
+| macOS 打包         | `package-macos.command` | `npm run package:mac` |
+| Windows 打包       | `package-windows.cmd`   | `npm run package:win` |
 
-1. 旅途手账：温暖纸张、网格和衬线封面。
-2. 海风明信片：清透青蓝、手写感封面和邮戳/地址线。
-3. 胶片画廊：深色画布、高对比照片和胶片孔边框。
+开发入口要求 Node.js 22.12.0 或更高版本。桌面 renderer 启用 sandbox、context isolation 与 web security，禁用 Node integration；preload 只暴露经过 Zod 校验的窄 API。应用拒绝新窗口、外部导航和权限请求。
 
-PDF 流程：
+生产包启用严格 CSP、cookie encryption、ASAR integrity 与 only-load-from-ASAR，并关闭 RunAsNode、Node options 和 CLI inspect。`grantFileProtocolExtraPrivileges` 必须保持开启，因为生产窗口通过 `loadFile()` 加载已打包页面；文件访问边界由 sandbox、CSP、导航限制、窄 IPC 和 `album-asset:` 协议共同负责。
 
-1. 保存当前项目并创建导出快照。
-2. 仅在导出对话框存在时按需挂载隔离的打印树，加载 `assets/print/` 高清图。
-3. 等待字体和图片就绪，再由主进程调用 `webContents.printToPDF`。
-4. 先写临时 PDF，校验 `%PDF-` 头和非空大小后原子替换目标；失败不会将残缺文件伪装成成功产物。
+## 10. 验证与发布门禁
 
-Chromium 进入 `printToPDF` 后不支持安全中断，因此首版显示阶段进度但不提供“已开始打印后强制取消”。用户可在保存对话框阶段取消。
+```bash
+cd album-studio
+npm ci
+npx playwright install chromium
+npm run check
+npm run test:e2e
+```
 
-## 8. 开发与分发体验
+`npm run check` 依次覆盖环境、lint、类型、单元/组件测试、桌面和浏览器生产构建、开发服务器 smoke 与浏览器 E2E；桌面 Electron E2E 由后续 `npm run test:e2e` 单独执行。
 
-### 8.1 最低门槛启动
+打包 smoke 还会检查：
 
-- macOS：双击根目录 `dev.command`。
-- Windows：双击根目录 `dev.cmd`。
-- 终端：`node album-studio/scripts/dev.mjs`。
+- 已打包进程能在 30 秒总时限内启动并通过 CDP 返回界面。
+- React 根节点、标题、preload API 与生产 CSP 均已就绪。
+- `app.asar` 不超过 64 MiB。
+- `sharp` 及当前平台原生依赖存在，macOS universal 包同时包含 arm64/x64 依赖。
+- 测试结束后进程树被清理。
 
-启动器会检查 Node.js >= 22.12.0，首次缺少依赖时自动执行 `npm install`，然后启动 Vite HMR 和 Electron。
+GitHub Actions 在 `macos-latest` 和 `windows-latest` 上分别执行完整检查、桌面 E2E、原生打包和 package smoke。Windows 是否可启动只以 Windows runner 或真实 Windows 机器的结果为依据，macOS 交叉构建不能替代运行验证。
 
-### 8.2 项目 Skill
+## 11. 已知边界
 
-`.agents/skills/album-studio-dev/SKILL.md` 记录了启动、边界、必跑检查、大样本验收与跨平台打包方式，供后续对话式修改自动触发。
+- 浏览器 OPFS 的持久性取决于浏览器配额与用户是否清除站点数据。
+- 浏览器端使用系统打印，不提供 Electron 原生 PDF 写文件能力。
+- 当前内测包使用 macOS ad-hoc 签名；公开发布仍需 Apple Developer ID、公证和 Windows Authenticode。
+- 长相册导出会同时挂载打印树；需要继续以真实大图和长页数样本监控内存峰值。
+- schema、命令和平台能力是架构边界；新增功能应先确认归属，避免在页面组件中直接访问文件系统或复制跨端逻辑。
 
-通过 `find-skills` 为项目安装并在 `skills-lock.json` 锁定了：
+## 12. 相关文档
 
-- `frontend-design`：建立明确的视觉方向，避免模板化界面。
-- `shadcn`：管理 shadcn/ui 组件、用法和组合。
-- `vercel-react-best-practices`：约束 React 状态、渲染和 bundle 性能。
-- `web-design-guidelines`：检查可用性、响应式和无障碍界面。
-- `webapp-testing`：使用 Playwright 验证本地界面、截图和日志。
-
-### 8.3 打包
-
-- Windows：`package-windows.cmd` / `npm run package:win`，x64 NSIS + portable。
-- macOS：`package-macos.command` / `npm run package:mac`，Intel + Apple Silicon universal DMG。
-- GitHub Actions：`.github/workflows/package.yml` 在 `windows-latest` 和 `macos-latest` 原生 runner 上运行检查和打包。
-
-当前为内部测试用未公证产物。正式对外发布需用户提供 Apple Developer ID/Notary 凭据与 Windows Authenticode 证书，这些凭据不进仓库。
-
-## 9. 验证结果
-
-| 验证项 | 结果 |
-| --- | --- |
-| lint + TypeScript + production build | 通过 |
-| common 单元测试 | 4/4 通过 |
-| renderer/store 组件测试 | 5/5 通过 |
-| Electron E2E | 6/6 通过；大样本用例默认跳过 |
-| 视觉验收 | 1440×900、1100×720、800×640，3 主题 × 封面/1/2/4/6 图页已检查 |
-| 真实旧相册 | 150 MB JSON、131 个去重素材、185 个放置项迁移通过 |
-| PDF 压力验收 | 48 页、A4 横向、约 69 MB，首/中/末代表页渲染正常 |
-| 源文件保护 | 迁移前后内容 hash 一致 |
-| macOS 包 | universal DMG 生成、签名完整性通过、打包应用真实启动通过 |
-| Windows 包 | x64 解包交叉构建成功，PE32+ `.exe`、ASAR 和安全熔丝已检查；NSIS/portable 原生产物由 Windows CI 生成，本次 macOS 主机不冒充 Windows 运行验收 |
-
-## 10. 主要风险与后续边界
-
-| 风险 | 当前控制 |
-| --- | --- |
-| 大图/长相册导致 UI 和 PDF 卡顿 | UI/print/original 三级资源，打印树按需挂载，150 MB 真实样本压测 |
-| 保存时崩溃损坏项目 | schema 校验、原子写、`fsync`、轮转备份、关闭握手 |
-| 原图丢失或项目移动 | 项目重定位；原图按内容 hash 校验后恢复 |
-| Electron 文件读取扩权 | sandbox/context isolation、窄 IPC、协议根路径限制、安全熔丝 |
-| 未签名安装包被系统拦截 | 内测文档明示说明；公开发布前配置 Apple/Windows 证书 |
-| Chromium 打印无法中途安全取消 | 导出快照、阶段状态、临时文件验证和失败清理 |
-
-## 11. 实施记录
-
-完整勾选项和最终 Review 见 `docs/todo.md`；使用见 `docs/user-guide.md`；开发与发布见 `docs/development.md` 和 `docs/release.md`。关键架构决策保存在 `docs/adr/`。
+- 使用说明：`docs/user-guide.md`
+- 开发说明：`docs/development.md`
+- 发布说明：`docs/release.md`
+- 设计方向：`docs/design-direction.md`
+- 架构决策：`docs/adr/`

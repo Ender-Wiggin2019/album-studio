@@ -1,15 +1,17 @@
-import { IPC_CHANNELS, SaveProjectRequestSchema, ThemeIdSchema } from '@album-studio/common'
+import {
+  CreateProjectRequestSchema,
+  IPC_CHANNELS,
+  SaveProjectRequestSchema
+} from '@album-studio/common'
 import { BrowserWindow, ipcMain, type IpcMainInvokeEvent } from 'electron'
 import { z } from 'zod'
 import type { AssetService } from '../assets/asset-service'
 import type { PdfExporter } from '../export/pdf-exporter'
-import type { LegacyAlbumImporter } from '../legacy/legacy-importer'
 import type { ProjectRepository } from '../projects/project-repository'
 
 type Services = {
   projects: ProjectRepository
   assets: AssetService
-  legacy: LegacyAlbumImporter
   pdf: PdfExporter
   onCloseReady: (ok: boolean) => void
 }
@@ -37,9 +39,7 @@ export function registerIpc(window: BrowserWindow, services: Services): () => vo
 
   handle(IPC_CHANNELS.projectsListRecent, () => services.projects.listRecent())
   handle(IPC_CHANNELS.projectsCreate, (_event, input: unknown) => {
-    const parsed = z
-      .object({ title: z.string().min(1).max(160), themeId: ThemeIdSchema })
-      .parse(input)
+    const parsed = CreateProjectRequestSchema.parse(input)
     return services.projects.createWithDialog(window, parsed)
   })
   handle(IPC_CHANNELS.projectsChooseAndOpen, () => services.projects.chooseAndOpen(window))
@@ -48,17 +48,13 @@ export function registerIpc(window: BrowserWindow, services: Services): () => vo
   )
   handle(IPC_CHANNELS.projectsSave, (_event, input: unknown) => {
     const request = SaveProjectRequestSchema.parse(input)
-    return services.projects.save(request.projectPath, request.project)
+    return services.projects.save(request.projectPath, request.document)
   })
   handle(IPC_CHANNELS.assetsImport, (_event, input: unknown) =>
     services.assets.chooseAndImport(window, input)
   )
   handle(IPC_CHANNELS.assetsRelink, (_event, input: unknown) =>
     services.assets.chooseAndRelink(window, input)
-  )
-  handle(IPC_CHANNELS.legacyChooseAndInspect, () => services.legacy.chooseAndInspect(window))
-  handle(IPC_CHANNELS.legacyCommit, (_event, input: unknown) =>
-    services.legacy.commit(window, input)
   )
   handle(IPC_CHANNELS.exportPdf, (_event, input: unknown) => services.pdf.export(window, input))
   handle(IPC_CHANNELS.appCloseReady, (_event, input: unknown) => {

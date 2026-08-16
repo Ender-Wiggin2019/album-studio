@@ -1,4 +1,4 @@
-import { IPC_CHANNELS, type AlbumStudioApi } from '@album-studio/common'
+import { IMAGE_PIPELINE_VERSION, IPC_CHANNELS, type AlbumStudioApi } from '@album-studio/common'
 import { contextBridge, ipcRenderer } from 'electron'
 
 const api: AlbumStudioApi = Object.freeze({
@@ -12,12 +12,15 @@ const api: AlbumStudioApi = Object.freeze({
   assets: Object.freeze({
     import: (input) => ipcRenderer.invoke(IPC_CHANNELS.assetsImport, input),
     relink: (input) => ipcRenderer.invoke(IPC_CHANNELS.assetsRelink, input),
-    url: (projectId, assetId, quality = 'preview') =>
-      `album-asset://project/${encodeURIComponent(projectId)}/${encodeURIComponent(assetId)}?quality=${quality}`
-  }),
-  legacy: Object.freeze({
-    chooseAndInspect: () => ipcRenderer.invoke(IPC_CHANNELS.legacyChooseAndInspect),
-    commit: (input) => ipcRenderer.invoke(IPC_CHANNELS.legacyCommit, input)
+    url: (projectId, assetId, quality = 'preview', usage) => {
+      const query = new URLSearchParams({
+        quality,
+        v: IMAGE_PIPELINE_VERSION
+      })
+      if (usage?.width !== undefined) query.set('width', String(usage.width))
+      if (usage?.height !== undefined) query.set('height', String(usage.height))
+      return `album-asset://project/${encodeURIComponent(projectId)}/${encodeURIComponent(assetId)}?${query.toString()}`
+    }
   }),
   export: Object.freeze({
     pdf: (input) => ipcRenderer.invoke(IPC_CHANNELS.exportPdf, input)

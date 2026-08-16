@@ -1,6 +1,6 @@
 .DS_Store
 
-# The legacy album contains private, very large Base64 photo data and remains a local read-only fixture.
+# The private reference fixture contains very large Base64 photo data and is never part of the app.
 /原始项目参考/
 
 # JavaScript / Electron outputs
@@ -12,6 +12,7 @@ coverage/
 playwright-report/
 test-results/
 *.log
+*.tsbuildinfo
 
 # User-created album projects and local QA artifacts
 *.album-project/

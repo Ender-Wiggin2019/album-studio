@@ -1,8 +1,17 @@
-import { ExportPdfRequestSchema, type ExportPdfResult } from '@album-studio/common'
-import { BrowserWindow, dialog } from 'electron'
+import {
+  ExportPdfRequestSchema,
+  pageSpecSizeInInches,
+  type ExportPdfResult,
+  type PageSpec
+} from '@album-studio/common'
+import { dialog, type BrowserWindow, type Size } from 'electron'
 import { rename, stat, unlink, writeFile } from 'node:fs/promises'
 import { basename, dirname, extname, join } from 'node:path'
 import type { ProjectRepository } from '../projects/project-repository'
+
+export function pdfPageSizeForPageSpec(pageSpec: PageSpec): Size {
+  return pageSpecSizeInInches(pageSpec)
+}
 
 function safePdfName(value: string): string {
   const cleaned = value
@@ -21,7 +30,7 @@ export class PdfExporter {
   async export(window: BrowserWindow, input: unknown): Promise<ExportPdfResult | null> {
     const request = ExportPdfRequestSchema.parse(input)
     const registration = this.projects.getRegisteredProjectByPath(request.projectPath)
-    if (registration.project.revision !== request.revision) {
+    if (registration.document.revision !== request.revision) {
       throw new Error('项目仍有未保存的更改，请等待保存完成后再导出。')
     }
 
@@ -50,9 +59,8 @@ export class PdfExporter {
 
     const pdf = await window.webContents.printToPDF({
       printBackground: true,
-      preferCSSPageSize: true,
-      landscape: true,
-      pageSize: 'A4',
+      preferCSSPageSize: false,
+      pageSize: pdfPageSizeForPageSpec(registration.document.pageSpec),
       margins: { top: 0, right: 0, bottom: 0, left: 0 }
     })
     try {

@@ -30,10 +30,17 @@ jobs:
           cache: npm
           cache-dependency-path: album-studio/package-lock.json
       - run: npm ci
-      - run: npm run check
-      - run: ${{ matrix.command }}
+      - name: Install Chromium for browser E2E
+        run: npx playwright install chromium
       - if: runner.os == 'macOS'
-        run: npm run verify:package:mac --workspace album-studio-desktop
+        name: Install native sharp for both macOS architectures
+        run: |
+          npm install --cpu=x64 --os=darwin sharp --no-save --package-lock=false
+          npm install --cpu=arm64 --os=darwin sharp --no-save --package-lock=false
+      - run: npm run check
+      - run: npm run test:e2e
+      - run: ${{ matrix.command }}
+      - run: npm run verify:package
       - uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.artifact }}

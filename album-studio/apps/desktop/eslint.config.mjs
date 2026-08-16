@@ -29,5 +29,11 @@ export default defineConfig(
       'react-refresh/only-export-components': ['error', { allowConstantExport: true }]
     }
   },
+  {
+    files: ['scripts/**/*.mjs'],
+    rules: {
+      '@typescript-eslint/explicit-function-return-type': 'off'
+    }
+  },
   eslintConfigPrettier
 )

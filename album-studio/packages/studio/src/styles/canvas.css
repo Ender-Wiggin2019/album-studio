@@ -1,0 +1,208 @@
+.album-block:focus-visible,
+.album-block[data-selected] {
+  outline: 2px solid var(--ring);
+  outline-offset: 3px;
+}
+
+.album-block[data-selected] .album-image-viewport {
+  box-shadow: 0 0 0 2px color-mix(in oklab, var(--primary) 88%, white);
+}
+
+.album-block[role='button'] {
+  cursor: move;
+  user-select: none;
+}
+
+.album-block[role='button']:hover:not([data-selected]) {
+  outline: 1px solid color-mix(in oklab, var(--ring) 68%, transparent);
+  outline-offset: 3px;
+}
+
+.album-block[role='button']:active {
+  cursor: grabbing;
+}
+
+.album-image-viewport {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: color-mix(in oklab, var(--album-page-alt) 82%, black);
+}
+
+.album-image-viewport > img {
+  display: block;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+.album-image-viewport[data-mask='rounded'] {
+  border-radius: 7%;
+}
+
+.album-image-viewport[data-mask='circle'] {
+  border-radius: 50%;
+}
+
+.album-image-viewport[data-mask='arch'] {
+  border-radius: 50% 50% 4% 4% / 42% 42% 4% 4%;
+}
+
+.album-image-viewport[data-mask='paper-edge'] {
+  clip-path: polygon(
+    1% 2%,
+    9% 0,
+    18% 2%,
+    31% 0,
+    43% 2%,
+    55% 0,
+    69% 2%,
+    82% 0,
+    99% 2%,
+    98% 14%,
+    100% 27%,
+    98% 41%,
+    100% 55%,
+    98% 69%,
+    100% 83%,
+    98% 99%,
+    84% 97%,
+    72% 100%,
+    57% 98%,
+    43% 100%,
+    28% 98%,
+    14% 100%,
+    1% 98%,
+    2% 84%,
+    0 70%,
+    2% 55%,
+    0 40%,
+    2% 25%,
+    0 12%
+  );
+}
+
+.album-image-viewport[data-mask='postage'] {
+  clip-path: polygon(
+    3% 0,
+    9% 3%,
+    15% 0,
+    21% 3%,
+    27% 0,
+    33% 3%,
+    39% 0,
+    45% 3%,
+    51% 0,
+    57% 3%,
+    63% 0,
+    69% 3%,
+    75% 0,
+    81% 3%,
+    87% 0,
+    93% 3%,
+    97% 0,
+    100% 4%,
+    97% 10%,
+    100% 16%,
+    97% 22%,
+    100% 28%,
+    97% 34%,
+    100% 40%,
+    97% 46%,
+    100% 52%,
+    97% 58%,
+    100% 64%,
+    97% 70%,
+    100% 76%,
+    97% 82%,
+    100% 88%,
+    97% 94%,
+    100% 98%,
+    96% 100%,
+    90% 97%,
+    84% 100%,
+    78% 97%,
+    72% 100%,
+    66% 97%,
+    60% 100%,
+    54% 97%,
+    48% 100%,
+    42% 97%,
+    36% 100%,
+    30% 97%,
+    24% 100%,
+    18% 97%,
+    12% 100%,
+    6% 97%,
+    2% 100%,
+    0 96%,
+    3% 90%,
+    0 84%,
+    3% 78%,
+    0 72%,
+    3% 66%,
+    0 60%,
+    3% 54%,
+    0 48%,
+    3% 42%,
+    0 36%,
+    3% 30%,
+    0 24%,
+    3% 18%,
+    0 12%,
+    3% 6%,
+    0 2%
+  );
+}
+
+.album-image-viewport[data-mask='film-frame'] {
+  border: clamp(5px, 1.1cqw, 14px) solid #151515;
+  border-radius: 2px;
+}
+
+.album-image-vignette {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.album-image-missing {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 0.5em;
+  padding: 8%;
+  color: var(--album-muted);
+  text-align: center;
+  font-size: clamp(7px, 1.1cqw, 14px);
+}
+
+.album-image-missing svg {
+  width: 1.5em;
+  height: 1.5em;
+}
+
+.album-image-caption {
+  position: absolute;
+  z-index: 2;
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  pointer-events: none;
+}
+
+.album-image-caption[data-placement='inside-bottom'] {
+  inset: auto 0 0;
+  padding: 8% 5% 4%;
+  color: white !important;
+  background: linear-gradient(transparent, rgb(0 0 0 / 65%));
+}
+
+.album-image-caption[data-placement='below'] {
+  top: calc(100% + 0.7cqw);
+  left: 0;
+}

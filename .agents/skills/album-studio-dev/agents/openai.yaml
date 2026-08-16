@@ -1,0 +1,4 @@
+interface:
+  display_name: "电子相册项目助手"
+  short_description: "一键启动，并按项目分层安全开发电子相册桌面版与网页版"
+  default_prompt: "使用 $album-studio-dev 为我启动电子相册项目，或完成我描述的功能需求。"

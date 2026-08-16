@@ -10,16 +10,21 @@ electronFuses:
   enableNodeCliInspectArguments: false
   enableEmbeddedAsarIntegrityValidation: true
   onlyLoadAppFromAsar: true
-  grantFileProtocolExtraPrivileges: false
+  grantFileProtocolExtraPrivileges: true
 files:
-  - '!**/.vscode/*'
-  - '!src/*'
-  - '!electron.vite.config.{js,ts,mjs,cjs}'
-  - '!{.eslintcache,eslint.config.mjs,.prettierignore,.prettierrc.yaml,dev-app-update.yml,CHANGELOG.md,README.md}'
-  - '!{.env,.env.*,.npmrc,pnpm-lock.yaml}'
-  - '!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}'
+  - out/**
+  - resources/**
+  - package.json
+  - node_modules/sharp/**
+  - node_modules/@img/**
+  - node_modules/@emnapi/**
+  - node_modules/detect-libc/**
+  - node_modules/semver/**
+  - node_modules/tslib/**
 asarUnpack:
   - resources/**
+  - '**/node_modules/sharp/**/*'
+  - '**/node_modules/@img/**/*'
 win:
   executableName: album-studio
   target:
@@ -35,6 +40,7 @@ mac:
   hardenedRuntime: false
   entitlementsInherit: build/entitlements.mac.plist
   category: public.app-category.photography
+  x64ArchFiles: Contents/Resources/app.asar.unpacked/node_modules/@img/**/*
   target:
     - target: dmg
       arch:

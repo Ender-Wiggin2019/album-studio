@@ -12,6 +12,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "immer": "^11.1.17",
     "zod": "4.4.3"
   },
   "devDependencies": {
