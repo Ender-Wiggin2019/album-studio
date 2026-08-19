@@ -83,6 +83,16 @@ async function assertNativeImagePipeline(executable) {
       throw new Error(`打包产物缺少原生图片依赖：${packagePath}`)
     }
   }
+
+  // 消除人物模型的 extraResources 目录（resources/models）
+  for (const modelName of ['lama_512_int8.onnx', 'selfie_segmentation.onnx']) {
+    const modelPath = join(resourcesDirectory, 'models', modelName)
+    try {
+      await access(modelPath)
+    } catch {
+      throw new Error(`打包产物缺少消除人物模型：${modelPath}`)
+    }
+  }
 }
 
 function packagedResourcesDirectory(executable) {

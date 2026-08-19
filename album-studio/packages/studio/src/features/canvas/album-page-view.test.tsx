@@ -6,6 +6,7 @@ import {
   createImageBlock,
   createRichTextBlock,
   createRichTextDocument,
+  eraseKeyFor,
   type AlbumDocument,
   type AssetRecord,
   type BlockTransform,
@@ -182,6 +183,75 @@ describe('AlbumPageView', () => {
       })
     )
     expect(screen.getByAltText('旅行照片.jpg')).toHaveAttribute('loading', 'eager')
+  })
+
+  it('requests the erased variant for blocks with erase parameters', async () => {
+    const getSource = vi.fn().mockResolvedValue('data:image/gif;base64,R0lGODlhAQABAAAAACw=')
+    const platform = {
+      assets: { getSource, releaseSource: vi.fn() }
+    } as unknown as StudioPlatform
+    const document = createAlbumDocument({ title: '消除渲染' })
+    document.assets.push(asset)
+    const page = createContentPage(() => 'page-erase')
+    const block = createImageBlock(asset.id, TRANSFORMS.image, () => 'block-erase')
+    block.erase = { autoDetect: true, strokes: [] }
+    page.blocks.push(block)
+    document.pages.push(page)
+
+    render(
+      <StudioPlatformProvider platform={platform}>
+        <AlbumPageView document={document} page={page} />
+      </StudioPlatformProvider>
+    )
+
+    await waitFor(() =>
+      expect(getSource).toHaveBeenCalledWith(document.id, asset.id, {
+        quality: 'erased',
+        eraseKey: eraseKeyFor({ autoDetect: true, strokes: [] }),
+        pageWidthRatio: 0.5,
+        pageHeightRatio: 0.4
+      })
+    )
+    expect(screen.getByAltText('旅行照片.jpg')).toBeVisible()
+  })
+
+  it('falls back to the base quality when the erased variant is missing', async () => {
+    const getSource = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('消除结果缓存缺失'))
+      .mockResolvedValueOnce('data:image/gif;base64,R0lGODlhAQABAAAAACw=')
+    const platform = {
+      assets: { getSource, releaseSource: vi.fn() }
+    } as unknown as StudioPlatform
+    const document = createAlbumDocument({ title: '消除回退' })
+    document.assets.push(asset)
+    const page = createContentPage(() => 'page-erase-fallback')
+    const block = createImageBlock(asset.id, TRANSFORMS.image, () => 'block-erase-fallback')
+    block.erase = { autoDetect: false, strokes: [{ mode: 'add', size: 0.05, points: [{ x: 0.5, y: 0.5 }, { x: 0.6, y: 0.5 }] }] }
+    page.blocks.push(block)
+    document.pages.push(page)
+
+    render(
+      <StudioPlatformProvider platform={platform}>
+        <AlbumPageView document={document} page={page} />
+      </StudioPlatformProvider>
+    )
+
+    await waitFor(() => expect(getSource).toHaveBeenCalledTimes(2))
+    expect(getSource).toHaveBeenNthCalledWith(
+      1,
+      document.id,
+      asset.id,
+      expect.objectContaining({ quality: 'erased' })
+    )
+    expect(getSource).toHaveBeenNthCalledWith(
+      2,
+      document.id,
+      asset.id,
+      expect.objectContaining({ quality: 'preview' })
+    )
+    expect(screen.getByAltText('旅行照片.jpg')).toBeVisible()
+    expect(screen.queryByText('图片文件不可用')).toBeNull()
   })
 
   it('reports a failed image source with the owning Block id', async () => {

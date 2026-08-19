@@ -5,10 +5,14 @@ import { pathToFileURL } from 'node:url'
 import { type ImageVariantRequest } from '../assets/image-store'
 
 export type AssetProtocolVariantRequest =
-  | Exclude<ImageVariantRequest, { variant: 'print' }>
+  | Exclude<ImageVariantRequest, { variant: 'print' | 'erased' }>
   | {
       variant: 'print'
       usage?: { widthFraction: number; heightFraction: number }
+    }
+  | {
+      variant: 'erased'
+      usage: { eraseKey: string }
     }
 
 type AssetResolver = {
@@ -99,6 +103,16 @@ export function parseAssetProtocolRequest(requestUrl: string): ParsedAssetProtoc
       variant: { variant: 'print', usage: parseUsage(url) }
     }
   }
+  if (quality === 'erased') {
+    const eraseKey = url.searchParams.get('erase')
+    if (eraseKey === null || !/^[0-9a-z]{4,64}$/.test(eraseKey)) {
+      throw new Error('消除结果键无效。')
+    }
+    if (url.searchParams.has('width') || url.searchParams.has('height')) {
+      throw new Error('消除结果请求不能包含打印尺寸。')
+    }
+    return { projectId, assetId, variant: { variant: 'erased', usage: { eraseKey } } }
+  }
   throw new Error('素材清晰度无效。')
 }
 
@@ -129,6 +143,8 @@ export async function createAssetProtocolResponse(
     headers.set('Cache-Control', IMMUTABLE_CACHE)
     headers.set('Content-Type', contentType(path))
     headers.set('X-Content-Type-Options', 'nosniff')
+    // 本地私有协议：允许 renderer 的 canvas/WebGL 读取像素（美颜等像素级处理需要）。
+    headers.set('Access-Control-Allow-Origin', '*')
     return new Response(fileResponse.body, {
       status: fileResponse.status,
       statusText: fileResponse.statusText,
@@ -139,10 +155,19 @@ export async function createAssetProtocolResponse(
   }
 }
 
-export function registerAssetScheme(): void {
+export function registerPrivilegedSchemes(): void {
   protocol.registerSchemesAsPrivileged([
     {
       scheme: 'album-asset',
+      privileges: {
+        standard: true,
+        secure: true,
+        supportFetchAPI: true,
+        corsEnabled: true
+      }
+    },
+    {
+      scheme: 'album-candidate',
       privileges: {
         standard: true,
         secure: true,

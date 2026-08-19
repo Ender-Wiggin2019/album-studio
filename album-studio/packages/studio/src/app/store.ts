@@ -13,7 +13,7 @@ import {
   type SaveDocument
 } from './project-save-session'
 
-export type ExclusiveWorkspace = 'preview' | 'image-edit' | null
+export type ExclusiveWorkspace = 'preview' | 'image-edit' | 'erase-people' | null
 export type PersistentPanelTab = 'layout' | 'assets' | 'components'
 export type RightPanelTab = PersistentPanelTab | 'block'
 export type SaveState = ProjectSaveState

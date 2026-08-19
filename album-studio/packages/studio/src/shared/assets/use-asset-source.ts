@@ -23,9 +23,9 @@ export function useAssetSource(
     ...INITIAL_STATE,
     requestKey: ''
   })
-  const { quality, pageWidthRatio, pageHeightRatio } = request
+  const { quality, pageWidthRatio, pageHeightRatio, eraseKey } = request
   const requestKey = assetId
-    ? `${documentId}:${assetId}:${quality}:${pageWidthRatio ?? ''}:${pageHeightRatio ?? ''}`
+    ? `${documentId}:${assetId}:${quality}:${pageWidthRatio ?? ''}:${pageHeightRatio ?? ''}:${eraseKey ?? ''}`
     : ''
 
   useEffect(() => {
@@ -38,7 +38,8 @@ export function useAssetSource(
       .getSource(documentId, assetId, {
         quality,
         pageWidthRatio,
-        pageHeightRatio
+        pageHeightRatio,
+        eraseKey
       })
       .then((nextSource) => {
         source = nextSource
@@ -53,7 +54,16 @@ export function useAssetSource(
       active = false
       if (source) platform.assets.releaseSource(source)
     }
-  }, [assetId, documentId, pageHeightRatio, pageWidthRatio, platform, quality, requestKey])
+  }, [
+    assetId,
+    documentId,
+    eraseKey,
+    pageHeightRatio,
+    pageWidthRatio,
+    platform,
+    quality,
+    requestKey
+  ])
 
   return state.requestKey === requestKey ? state : INITIAL_STATE
 }

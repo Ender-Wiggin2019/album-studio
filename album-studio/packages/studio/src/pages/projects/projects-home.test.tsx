@@ -26,12 +26,18 @@ function platform(): StudioPlatform {
       }))
     },
     assets: {
-      import: vi.fn(async () => null),
+      pickCandidates: vi.fn(async () => null),
+      importCandidates: vi.fn(async () => null),
+      releaseCandidates: vi.fn(),
       relink: vi.fn(async () => null),
       getSource: vi.fn(async () => ''),
       releaseSource: vi.fn()
     },
     export: { pdf: vi.fn(async () => null) },
+    imageErase: {
+      detect: vi.fn(async () => ({ maskBase64: 'iVBORw0KGgo=', width: 100, height: 100 })),
+      apply: vi.fn(async () => ({ eraseKey: 'abc123', width: 100, height: 100 }))
+    },
     lifecycle: {
       onCloseRequest: vi.fn(() => () => undefined),
       closeReady: vi.fn(async () => undefined)
@@ -57,13 +63,15 @@ describe('ProjectsHome page size selection', () => {
     await user.click(screen.getByRole('radio', { name: /12 寸方形/ }))
     await user.click(screen.getByRole('button', { name: '创建相册' }))
 
+    const squarePreset = PAGE_SPEC_PRESETS.find((preset) => preset.presetId === 'square-12')
+    if (!squarePreset) throw new Error('找不到方形预设')
     await waitFor(() =>
       expect(studioPlatform.projects.create).toHaveBeenCalledWith({
         title: '我的新相册',
         themeId: 'journal',
-        pageSpec: PAGE_SPEC_PRESETS[1]
+        pageSpec: squarePreset
       })
     )
-    expect(useStudioStore.getState().document?.pageSpec).toEqual(PAGE_SPEC_PRESETS[1])
+    expect(useStudioStore.getState().document?.pageSpec).toEqual(squarePreset)
   })
 })

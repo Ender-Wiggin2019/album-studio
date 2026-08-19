@@ -7,7 +7,12 @@ import {
   type AssetRecord,
   type PageSpec
 } from '@album-studio/common'
-import type { AssetQuality, AssetSourceRequest, StudioPlatform } from '@album-studio/studio'
+import type {
+  AssetQuality,
+  AssetSourceRequest,
+  ImportAssetsResult,
+  StudioPlatform
+} from '@album-studio/studio'
 import {
   fileExists,
   getNestedDirectory,
@@ -124,6 +129,8 @@ export function createBrowserPlatform(options?: {
   const derivatives = new TaskPool(2)
   const sourcesByKey = new Map<string, SourceCacheEntry>()
   const keysByUrl = new Map<string, string>()
+  const candidateFiles = new Map<string, File>()
+  const candidateUrls = new Map<string, string>()
 
   void requestPersistentStorage()
 
@@ -171,6 +178,83 @@ export function createBrowserPlatform(options?: {
     }
   }
 
+  const importFilesIntoDocument = async (
+    documentId: string,
+    files: File[]
+  ): Promise<{
+    assets: AssetRecord[]
+    duplicateAssetIds: string[]
+    skipped: ImportAssetsResult['skipped']
+  }> => {
+    const document = await load(documentId)
+    const knownByHash = new Map(document.assets.map((asset) => [asset.contentHash, asset]))
+    const assets: AssetRecord[] = []
+    const duplicateAssetIds: string[] = []
+    const skipped: ImportAssetsResult['skipped'] = []
+    const { extensionForMimeType, inspectImage } = await loadImagePipeline()
+
+    for (const file of files) {
+      try {
+        if (!SUPPORTED_IMAGE_TYPES.has(file.type as AssetRecord['mimeType'])) {
+          throw new Error('仅支持 JPEG、PNG、WebP 与 AVIF')
+        }
+        const metadata = await inspectImage(file)
+        const duplicate = knownByHash.get(metadata.contentHash)
+        if (duplicate) {
+          duplicateAssetIds.push(duplicate.id)
+          continue
+        }
+
+        const project = await getProjectDirectory(documentId)
+        const originals = await getNestedDirectory(project, ['assets', 'original'], true)
+        const originalName = `${metadata.contentHash}.${extensionForMimeType(file.type)}`
+        if (!(await fileExists(originals, originalName))) {
+          await writeFile(originals, originalName, file)
+        }
+
+        const asset: AssetRecord = {
+          id: crypto.randomUUID(),
+          fileName: file.name,
+          contentHash: metadata.contentHash,
+          mimeType: file.type as AssetRecord['mimeType'],
+          byteSize: file.size,
+          width: metadata.width,
+          height: metadata.height,
+          importedAt: now()
+        }
+        assets.push(asset)
+        knownByHash.set(asset.contentHash, asset)
+        await Promise.allSettled([
+          ensureDerivative(
+            documentId,
+            asset,
+            'thumbnail',
+            { quality: 'thumbnail' },
+            document.pageSpec
+          ),
+          ensureDerivative(
+            documentId,
+            asset,
+            'preview',
+            { quality: 'preview' },
+            document.pageSpec
+          )
+        ])
+      } catch (error) {
+        skipped.push({
+          fileName: file.name,
+          reason: error instanceof Error ? error.message : '图片处理失败'
+        })
+      }
+    }
+
+    documents.set(documentId, {
+      ...document,
+      assets: [...document.assets, ...assets]
+    })
+    return { assets, duplicateAssetIds, skipped }
+  }
+
   return {
     kind: 'web',
     capabilities: new Set(['folder-import']),
@@ -204,76 +288,46 @@ export function createBrowserPlatform(options?: {
       }
     },
     assets: {
-      async import(documentId, source) {
+      async pickCandidates(documentId, source) {
         const files = await chooseFiles(source)
         if (files.length === 0) return null
-        const document = await load(documentId)
-        const knownByHash = new Map(document.assets.map((asset) => [asset.contentHash, asset]))
-        const assets: AssetRecord[] = []
-        const duplicateAssetIds: string[] = []
-        const skipped: Array<{ fileName: string; reason: string }> = []
-        const { extensionForMimeType, inspectImage } = await loadImagePipeline()
-
-        for (const file of files) {
-          try {
-            if (!SUPPORTED_IMAGE_TYPES.has(file.type as AssetRecord['mimeType'])) {
-              throw new Error('仅支持 JPEG、PNG、WebP 与 AVIF')
-            }
-            const metadata = await inspectImage(file)
-            const duplicate = knownByHash.get(metadata.contentHash)
-            if (duplicate) {
-              duplicateAssetIds.push(duplicate.id)
-              continue
-            }
-
-            const project = await getProjectDirectory(documentId)
-            const originals = await getNestedDirectory(project, ['assets', 'original'], true)
-            const originalName = `${metadata.contentHash}.${extensionForMimeType(file.type)}`
-            if (!(await fileExists(originals, originalName))) {
-              await writeFile(originals, originalName, file)
-            }
-
-            const asset: AssetRecord = {
-              id: crypto.randomUUID(),
-              fileName: file.name,
-              contentHash: metadata.contentHash,
-              mimeType: file.type as AssetRecord['mimeType'],
-              byteSize: file.size,
-              width: metadata.width,
-              height: metadata.height,
-              importedAt: now()
-            }
-            assets.push(asset)
-            knownByHash.set(asset.contentHash, asset)
-            await Promise.allSettled([
-              ensureDerivative(
-                documentId,
-                asset,
-                'thumbnail',
-                { quality: 'thumbnail' },
-                document.pageSpec
-              ),
-              ensureDerivative(
-                documentId,
-                asset,
-                'preview',
-                { quality: 'preview' },
-                document.pageSpec
-              )
-            ])
-          } catch (error) {
-            skipped.push({
-              fileName: file.name,
-              reason: error instanceof Error ? error.message : '图片处理失败'
-            })
+        for (const url of candidateUrls.values()) URL.revokeObjectURL(url)
+        candidateFiles.clear()
+        candidateUrls.clear()
+        return files.map((file, index) => {
+          const id = `candidate-${index + 1}`
+          candidateFiles.set(id, file)
+          const url = URL.createObjectURL(file)
+          candidateUrls.set(id, url)
+          return {
+            id,
+            fileName: file.name,
+            byteSize: file.size,
+            previewUrl: url
           }
-        }
-
-        documents.set(documentId, {
-          ...document,
-          assets: [...document.assets, ...assets]
         })
-        return { assets, duplicateAssetIds, skipped }
+      },
+      async importCandidates(documentId, candidateIds) {
+        const files = candidateIds
+          .map((id) => candidateFiles.get(id))
+          .filter((file): file is File => Boolean(file))
+        if (files.length === 0) return null
+        const result = await importFilesIntoDocument(documentId, files)
+        for (const id of candidateIds) {
+          const url = candidateUrls.get(id)
+          if (url) URL.revokeObjectURL(url)
+          candidateFiles.delete(id)
+          candidateUrls.delete(id)
+        }
+        return result
+      },
+      releaseCandidates(candidateIds) {
+        for (const id of candidateIds) {
+          const url = candidateUrls.get(id)
+          if (url) URL.revokeObjectURL(url)
+          candidateFiles.delete(id)
+          candidateUrls.delete(id)
+        }
       },
       async relink() {
         return null
@@ -282,6 +336,9 @@ export function createBrowserPlatform(options?: {
         const document = await load(documentId)
         const asset = document.assets.find((candidate) => candidate.id === assetId)
         if (!asset) throw new Error('找不到图片资源')
+        if (request.quality === 'erased') {
+          throw new Error('消除人物仅在桌面版可用。')
+        }
 
         let file: File
         let cacheKey: string
@@ -324,6 +381,14 @@ export function createBrowserPlatform(options?: {
       async pdf(document) {
         window.print()
         return { displayName: `${document.title}.pdf` }
+      }
+    },
+    imageErase: {
+      async detect() {
+        throw new Error('消除人物仅在桌面版可用。')
+      },
+      async apply() {
+        throw new Error('消除人物仅在桌面版可用。')
       }
     },
     lifecycle: {

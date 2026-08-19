@@ -19,6 +19,9 @@ test-results/
 /tmp/
 /output/
 
+# AI 模型文件（消除人物功能，约 60MB，不进版本库；见 apps/desktop/resources/models/README.md）
+album-studio/apps/desktop/resources/models/*.onnx
+
 # Local environment and signing material
 .env
 .env.*

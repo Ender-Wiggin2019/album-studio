@@ -1,5 +1,9 @@
 import type { AlbumPageKind, BlockTransform, PageLayoutId } from './schema'
 
+export const FREE_FORM_LAYOUT_ID = 'free-form' as const
+export const FREE_FORM_LAYOUT_NAME = '自定义布局' as const
+export const FREE_FORM_LAYOUT_DESCRIPTION = '照片保持原图比例，自由摆放' as const
+
 export type PageLayoutSlot = Readonly<{
   accepts: 'image' | 'rich-text'
   transform: Readonly<BlockTransform>

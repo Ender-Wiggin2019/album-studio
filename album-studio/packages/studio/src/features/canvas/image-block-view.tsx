@@ -1,6 +1,7 @@
 import {
   computeCropStyle,
   computeImageEffectStyle,
+  eraseKeyFor,
   type AlbumDocument,
   type ImageBlock,
   type TextStyle
@@ -49,6 +50,29 @@ export function ImageBlockView({
   const cropStyle =
     sourceSize && viewportSize ? computeCropStyle(block.crop, sourceSize, viewportSize) : undefined
 
+  const eraseKey = block.erase ? eraseKeyFor(block.erase) : null
+  const [erasedUnavailable, setErasedUnavailable] = useState(false)
+  const [lastEraseKey, setLastEraseKey] = useState(eraseKey)
+  // 渲染期调整：erase 参数变化时重新尝试 erased 变体（避免 effect 内 setState）
+  if (lastEraseKey !== eraseKey) {
+    setLastEraseKey(eraseKey)
+    setErasedUnavailable(false)
+  }
+  const usesErased = block.erase !== undefined && !erasedUnavailable
+
+  const sourceRequest = usesErased && block.erase
+    ? {
+        quality: 'erased' as const,
+        eraseKey: eraseKeyFor(block.erase),
+        pageWidthRatio: block.transform.width,
+        pageHeightRatio: block.transform.height
+      }
+    : {
+        quality,
+        pageWidthRatio: block.transform.width,
+        pageHeightRatio: block.transform.height
+      }
+
   return (
     <div className="album-image-block-content">
       <div ref={viewportRef} className="album-image-viewport" data-mask={block.mask.kind}>
@@ -56,11 +80,8 @@ export function ImageBlockView({
           <AssetImage
             documentId={document.id}
             assetId={asset.id}
-            sourceRequest={{
-              quality,
-              pageWidthRatio: block.transform.width,
-              pageHeightRatio: block.transform.height
-            }}
+            sourceRequest={sourceRequest}
+            beautify={block.effects}
             alt={block.caption.text || asset.fileName}
             draggable={false}
             decoding="async"
@@ -81,6 +102,11 @@ export function ImageBlockView({
               setSourceSize({ width: image.naturalWidth, height: image.naturalHeight })
             }}
             onSourceError={() => {
+              // 消除结果缓存缺失时回退到原图，而不是当作图片丢失
+              if (usesErased) {
+                setErasedUnavailable(true)
+                return
+              }
               setSourceFailed(true)
               onSourceError?.()
             }}

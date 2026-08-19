@@ -4,21 +4,24 @@ import { join } from 'node:path'
 import { electronApp, is, optimizer } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { AssetService } from './assets/asset-service'
+import { EraseService } from './erase/erase-service'
 import { PdfExporter } from './export/pdf-exporter'
 import { registerIpc } from './ipc/register-ipc'
 import { ProjectRepository } from './projects/project-repository'
-import { handleAssetProtocol, registerAssetScheme } from './protocol/asset-protocol'
+import { handleAssetProtocol, registerPrivilegedSchemes } from './protocol/asset-protocol'
+import { handleCandidateProtocol } from './protocol/candidate-protocol'
 import { buildContentSecurityPolicy } from './security/content-security-policy'
 
 const isolatedUserData = process.env.ALBUM_STUDIO_USER_DATA_DIR
 if (!app.isPackaged && isolatedUserData) app.setPath('userData', isolatedUserData)
 const development = !app.isPackaged && is.dev
 
-registerAssetScheme()
+registerPrivilegedSchemes()
 app.enableSandbox()
 
 let projects: ProjectRepository
 let assets: AssetService
+let erase: EraseService
 let pdf: PdfExporter
 let startupFailure: Promise<void> | undefined
 
@@ -92,6 +95,7 @@ async function createWindow(): Promise<BrowserWindow> {
   const unregisterIpc = registerIpc(mainWindow, {
     projects,
     assets,
+    erase,
     pdf,
     onCloseReady: (ok) => {
       closeRequestPending = false
@@ -176,8 +180,10 @@ if (!app.requestSingleInstanceLock()) {
 
       projects = new ProjectRepository()
       assets = new AssetService(projects)
+      erase = new EraseService(projects)
       pdf = new PdfExporter(projects)
       handleAssetProtocol(projects)
+      handleCandidateProtocol(assets)
 
       app.on('browser-window-created', (_event, window) => {
         if (development) optimizer.watchWindowShortcuts(window)

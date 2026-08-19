@@ -9,11 +9,15 @@ import {
   type ImageEffects,
   type ImageMask
 } from '@album-studio/common'
-import { FlipHorizontal2Icon, FlipVertical2Icon, RotateCcwIcon } from 'lucide-react'
-import { useState } from 'react'
-import Cropper, { type Area, type Point } from 'react-easy-crop'
+import { FlipHorizontal2Icon, FlipVertical2Icon, RotateCcwIcon, Wand2Icon } from 'lucide-react'
+import { useRef, useState } from 'react'
+import ReactCrop, { type Crop, type PercentCrop } from 'react-image-crop'
+import 'react-image-crop/dist/ReactCrop.css'
 import { useStudioStore } from '@/app/store'
 import { useAssetSource } from '@/shared/assets/use-asset-source'
+import { useEditSource } from '@/shared/crop/use-edit-source'
+import { useElementSize } from '@/shared/dom/use-element-size'
+import { autoEnhanceImageSource } from './auto-enhance-image-source'
 import { Button } from '@/components/ui/button'
 import { Field, FieldGroup, FieldLabel, FieldLegend, FieldSet } from '@/components/ui/field'
 import {
@@ -50,16 +54,16 @@ const EFFECT_CONTROLS: ReadonlyArray<{
   { key: 'sepia', label: '复古', min: 0, max: 1, step: 0.01, suffix: '' },
   { key: 'grayscale', label: '黑白', min: 0, max: 1, step: 0.01, suffix: '' },
   { key: 'blurPx', label: '柔焦', min: 0, max: 20, step: 0.1, suffix: 'px' },
-  { key: 'vignette', label: '暗角', min: 0, max: 1, step: 0.01, suffix: '' }
+  { key: 'vignette', label: '暗角', min: 0, max: 1, step: 0.01, suffix: '' },
+  { key: 'beautySmooth', label: '磨皮', min: 0, max: 1, step: 0.01, suffix: '' },
+  { key: 'beautyWhiten', label: '美白', min: 0, max: 1, step: 0.01, suffix: '' },
+  { key: 'clarity', label: '清晰度', min: 0, max: 1, step: 0.01, suffix: '' }
 ]
+const BEAUTY_MAX_EDGE = 2048
 const DARK_OUTLINE_BUTTON =
   'border-white/20 bg-white/5 text-white hover:bg-white/10 hover:text-white'
 
-function samePoint(left: Point, right: Point): boolean {
-  return left.x === right.x && left.y === right.y
-}
-
-function sameArea(left: Area, right: Area): boolean {
+function sameArea(left: ImageCrop['area'], right: PercentCrop): boolean {
   return (
     left.x === right.x &&
     left.y === right.y &&
@@ -68,25 +72,14 @@ function sameArea(left: Area, right: Area): boolean {
   )
 }
 
-function isValidArea(area: Area): boolean {
-  return (
-    Number.isFinite(area.x) &&
-    Number.isFinite(area.y) &&
-    Number.isFinite(area.width) &&
-    Number.isFinite(area.height) &&
-    area.width > 0 &&
-    area.height > 0
-  )
-}
-
-function isFullImageArea(area: Area): boolean {
-  return area.x === 0 && area.y === 0 && area.width === 100 && area.height === 100
-}
-
 function hasPresetEffects(current: ImageEffects, preset: ImageEffects): boolean {
   return (Object.keys(current) as Array<keyof ImageEffects>).every(
     (key) => current[key] === preset[key]
   )
+}
+
+function fullImageCrop(): Crop {
+  return { unit: '%', x: 0, y: 0, width: 100, height: 100 }
 }
 
 export function PhotoEditWorkspace(): React.JSX.Element {
@@ -101,23 +94,71 @@ export function PhotoEditWorkspace(): React.JSX.Element {
     : undefined
   const imageBlock = selectedBlock?.type === 'image' ? selectedBlock : undefined
   const asset = document?.assets.find((candidate) => candidate.id === imageBlock?.assetId)
-  const [cropPoint, setCropPoint] = useState<Point>({ x: 0, y: 0 })
-  const [zoom, setZoom] = useState(1)
   const [crop, setCrop] = useState<ImageCrop>(() =>
     structuredClone(imageBlock?.crop ?? DEFAULT_IMAGE_CROP)
   )
+  const [selection, setSelection] = useState<Crop>(() => ({
+    unit: '%',
+    ...(imageBlock?.crop.area ?? DEFAULT_IMAGE_CROP.area)
+  }))
   const [effects, setEffects] = useState<ImageEffects>(() =>
     structuredClone(imageBlock?.effects ?? DEFAULT_IMAGE_EFFECTS)
   )
   const [mask, setMask] = useState<ImageMask>(() =>
     structuredClone(imageBlock?.mask ?? DEFAULT_IMAGE_MASK)
   )
-  const [initialCropArea] = useState<Area>(() => ({
-    ...(imageBlock?.crop.area ?? DEFAULT_IMAGE_CROP.area)
-  }))
-  const restoredCropArea = isFullImageArea(initialCropArea) ? undefined : initialCropArea
   const source = useAssetSource(document?.id ?? '', asset?.id ?? null, { quality: 'original' })
+  const editSource = useEditSource(
+    source.source,
+    {
+      beautySmooth: effects.beautySmooth,
+      beautyWhiten: effects.beautyWhiten,
+      clarity: effects.clarity,
+      rotationDeg: crop.rotationDeg,
+      flipX: crop.flipX,
+      flipY: crop.flipY
+    },
+    BEAUTY_MAX_EDGE
+  ).source
   const effectStyle = computeImageEffectStyle(effects)
+  const [autoAnalyzing, setAutoAnalyzing] = useState(false)
+  const viewportRef = useRef<HTMLDivElement>(null)
+  const viewportSize = useElementSize(viewportRef)
+  const [naturalSize, setNaturalSize] = useState<{ width: number; height: number } | null>(null)
+  // 预览图按原比例 contain 放入视口且不放大原图：整张照片（含底部）始终可见、
+  // 四周留出空间方便拖拽裁剪框，小图也不会被放大到占满整个预览区
+  const displaySize =
+    viewportSize && naturalSize
+      ? (() => {
+          const scale = Math.min(
+            1,
+            viewportSize.width / naturalSize.width,
+            viewportSize.height / naturalSize.height
+          )
+          return {
+            width: Math.max(1, Math.floor(naturalSize.width * scale)),
+            height: Math.max(1, Math.floor(naturalSize.height * scale))
+          }
+        })()
+      : undefined
+
+  const handleAutoEnhance = async (): Promise<void> => {
+    if (!source.source || autoAnalyzing) return
+    setAutoAnalyzing(true)
+    try {
+      const auto = await autoEnhanceImageSource(source.source, crop.area)
+      if (auto) {
+        setEffects((current) => ({
+          ...current,
+          brightness: auto.brightness,
+          contrast: auto.contrast,
+          saturation: auto.saturation
+        }))
+      }
+    } finally {
+      setAutoAnalyzing(false)
+    }
+  }
 
   if (!document || !page || !imageBlock || !asset) {
     return (
@@ -133,9 +174,8 @@ export function PhotoEditWorkspace(): React.JSX.Element {
   }
 
   const reset = (): void => {
-    setCropPoint({ x: 0, y: 0 })
-    setZoom(1)
     setCrop(structuredClone(DEFAULT_IMAGE_CROP))
+    setSelection(fullImageCrop())
     setEffects(structuredClone(DEFAULT_IMAGE_EFFECTS))
     setMask(structuredClone(DEFAULT_IMAGE_MASK))
   }
@@ -156,7 +196,7 @@ export function PhotoEditWorkspace(): React.JSX.Element {
       <header className="flex h-16 shrink-0 items-center justify-between gap-4 border-b border-white/10 px-5">
         <div>
           <p className="text-sm font-semibold">{asset.fileName}</p>
-          <p className="text-xs text-white/55">裁剪、框内旋转、滤镜与蒙版</p>
+          <p className="text-xs text-white/55">自由裁剪、框内旋转、滤镜、美颜与蒙版</p>
         </div>
         <div className="flex gap-2">
           <Button
@@ -169,52 +209,57 @@ export function PhotoEditWorkspace(): React.JSX.Element {
           <Button onClick={apply}>应用到照片</Button>
         </div>
       </header>
-      <div className="grid min-h-0 flex-1 lg:grid-cols-[minmax(0,1fr)_360px]">
+      <div className="grid min-h-0 flex-1 grid-rows-[auto_minmax(0,1fr)] lg:grid-cols-[minmax(0,1fr)_360px] lg:grid-rows-[minmax(0,1fr)]">
         <div className="relative min-h-[320px] overflow-hidden bg-[#0f1114]">
           <div
-            className="absolute inset-[7%] overflow-hidden shadow-2xl album-image-viewport"
+            ref={viewportRef}
+            className="absolute inset-[9%] overflow-hidden shadow-2xl album-image-viewport"
             data-mask={mask.kind}
           >
             {source.source ? (
-              <Cropper
-                image={source.source}
-                crop={cropPoint}
-                zoom={zoom}
-                rotation={crop.rotationDeg}
-                aspect={imageBlock.transform.width / imageBlock.transform.height}
-                minZoom={1}
-                maxZoom={4}
-                initialCroppedAreaPercentages={restoredCropArea}
-                transform={`translate(${cropPoint.x}px, ${cropPoint.y}px) rotate(${crop.rotationDeg}deg) scale(${zoom}) scaleX(${crop.flipX ? -1 : 1}) scaleY(${crop.flipY ? -1 : 1})`}
-                onCropChange={(nextPoint) =>
-                  setCropPoint((current) => (samePoint(current, nextPoint) ? current : nextPoint))
-                }
-                onZoomChange={(nextZoom) =>
-                  setZoom((current) => (current === nextZoom ? current : nextZoom))
-                }
-                onRotationChange={(rotationDeg) =>
-                  setCrop((current) =>
-                    current.rotationDeg === rotationDeg ? current : { ...current, rotationDeg }
-                  )
-                }
-                onCropComplete={(croppedAreaPercentages) =>
-                  setCrop((current) =>
-                    !isValidArea(croppedAreaPercentages) ||
-                    sameArea(current.area, croppedAreaPercentages)
-                      ? current
-                      : { ...current, area: croppedAreaPercentages }
-                  )
-                }
-                showGrid
-                style={{
-                  containerStyle: { background: '#0f1114' },
-                  mediaStyle: { filter: effectStyle.filter },
-                  cropAreaStyle: {
-                    border: '1px solid rgba(255,255,255,.92)',
-                    boxShadow: '0 0 0 9999em rgba(0,0,0,.45)'
+              <div className="grid size-full place-items-center">
+                <ReactCrop
+                  crop={selection}
+                  onChange={(_, percentageCrop) => setSelection(percentageCrop)}
+                  onComplete={(_, percentageCrop) =>
+                    setCrop((current) =>
+                      sameArea(current.area, percentageCrop)
+                        ? current
+                        : {
+                            ...current,
+                            area: {
+                              x: percentageCrop.x,
+                              y: percentageCrop.y,
+                              width: percentageCrop.width,
+                              height: percentageCrop.height
+                            }
+                          }
+                    )
                   }
-                }}
-              />
+                  keepSelection
+                  minWidth={64}
+                  minHeight={64}
+                  ruleOfThirds
+                >
+                  <img
+                    className="album-edit-source-image"
+                    src={editSource ?? source.source}
+                    alt={asset.fileName}
+                    draggable={false}
+                    style={{
+                      width: displaySize?.width,
+                      height: displaySize?.height,
+                      maxWidth: '100%',
+                      maxHeight: '100%',
+                      filter: effectStyle.filter
+                    }}
+                    onLoad={(event) => {
+                      const image = event.currentTarget
+                      setNaturalSize({ width: image.naturalWidth, height: image.naturalHeight })
+                    }}
+                  />
+                </ReactCrop>
+              </div>
             ) : (
               <div className="grid size-full place-items-center text-sm text-white/60">
                 {source.failed ? '无法读取原图' : '正在读取原图…'}
@@ -233,20 +278,6 @@ export function PhotoEditWorkspace(): React.JSX.Element {
             <FieldSet>
               <FieldLegend className="text-white">裁剪与框内变换</FieldLegend>
               <FieldGroup>
-                <Field>
-                  <div className="flex justify-between">
-                    <FieldLabel>缩放</FieldLabel>
-                    <span className="font-mono text-xs text-white/55">{zoom.toFixed(2)}×</span>
-                  </div>
-                  <Slider
-                    aria-label="缩放"
-                    min={1}
-                    max={4}
-                    step={0.01}
-                    value={[zoom]}
-                    onValueChange={(value) => setZoom(value[0])}
-                  />
-                </Field>
                 <Field>
                   <div className="flex justify-between">
                     <FieldLabel>框内旋转</FieldLabel>
@@ -287,7 +318,19 @@ export function PhotoEditWorkspace(): React.JSX.Element {
             </FieldSet>
 
             <Field>
-              <FieldLabel>滤镜预设</FieldLabel>
+              <div className="flex items-center justify-between gap-2">
+                <FieldLabel>滤镜预设</FieldLabel>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className={DARK_OUTLINE_BUTTON}
+                  disabled={autoAnalyzing || !source.source}
+                  onClick={() => void handleAutoEnhance()}
+                >
+                  <Wand2Icon data-icon="inline-start" />
+                  {autoAnalyzing ? '正在分析…' : '自动美化'}
+                </Button>
+              </div>
               <div className="grid grid-cols-2 gap-2">
                 {IMAGE_EFFECT_PRESETS.map((preset) => (
                   <Button

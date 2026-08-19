@@ -32,6 +32,9 @@ const EditorWorkspace = lazy(async () => ({
 const PhotoEditWorkspace = lazy(async () => ({
   default: (await import('@/features/image-edit/photo-edit-workspace')).PhotoEditWorkspace
 }))
+const ErasePeopleWorkspace = lazy(async () => ({
+  default: (await import('@/features/image-edit/erase-people-workspace')).ErasePeopleWorkspace
+}))
 
 function WorkspaceLoading(): React.JSX.Element {
   return (
@@ -100,6 +103,8 @@ export function StudioWorkspace(): React.JSX.Element {
       }
 
       const state = useStudioStore.getState()
+      // 照片编辑/消除人物等独占工作区打开时，画布快捷键不应作用于背后的编辑器
+      if (state.exclusiveWorkspace) return
       const { document: currentDocument, selectedPageId, selectedBlockId } = state
       if (!currentDocument || !selectedPageId || !selectedBlockId) return
       const page = currentDocument.pages.find((candidate) => candidate.id === selectedPageId)
@@ -210,11 +215,11 @@ export function StudioWorkspace(): React.JSX.Element {
     }
   }
 
-  if (exclusiveWorkspace === 'image-edit') {
+  if (exclusiveWorkspace === 'erase-people') {
     return (
       <div className="app-shell flex h-dvh flex-col overflow-hidden">
         <Suspense fallback={<WorkspaceLoading />}>
-          <PhotoEditWorkspace />
+          <ErasePeopleWorkspace />
         </Suspense>
       </div>
     )
@@ -290,6 +295,19 @@ export function StudioWorkspace(): React.JSX.Element {
           </Suspense>
         )}
       </div>
+      {exclusiveWorkspace === 'image-edit' ? (
+        <Dialog open onOpenChange={(open) => !open && setExclusiveWorkspace(null)}>
+          <DialogContent
+            showCloseButton={false}
+            aria-label="照片编辑"
+            className="h-[min(88dvh,900px)] max-h-[min(88dvh,900px)] w-[min(1200px,calc(100vw-2rem))] max-w-none grid-rows-[minmax(0,1fr)] gap-0 overflow-hidden rounded-xl p-0"
+          >
+            <Suspense fallback={<WorkspaceLoading />}>
+              <PhotoEditWorkspace />
+            </Suspense>
+          </DialogContent>
+        </Dialog>
+      ) : null}
       {exportOpen ? <PrintBook document={document} /> : null}
       <Dialog open={exportOpen} onOpenChange={(open) => !exporting && setExportOpen(open)}>
         <DialogContent showCloseButton={!exporting}>

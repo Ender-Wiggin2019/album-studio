@@ -24,13 +24,28 @@ export function PageRail(): React.JSX.Element {
   const [pendingDelete, setPendingDelete] = useState<string | null>(null)
 
   if (!document) return <aside />
-  const addBlankPage = (): void => {
-    dispatch({ type: 'add-page', afterPageId: document.pages.at(-1)?.id })
-    const pageId = useStudioStore.getState().document?.pages.at(-1)?.id
+  const addBlankPage = (afterPageId: string | undefined): void => {
+    dispatch({ type: 'add-page', afterPageId })
+    const pages = useStudioStore.getState().document?.pages
+    if (!pages) return
+    const anchorIndex = afterPageId
+      ? pages.findIndex((page) => page.id === afterPageId)
+      : pages.length - 1
+    const pageId = pages[anchorIndex + 1]?.id ?? pages.at(-1)?.id
     if (pageId) selectPage(pageId)
   }
   return (
-    <aside className="page-rail border-r bg-muted/35" aria-label="相册页面">
+    <aside
+      className="page-rail border-r bg-muted/35"
+      aria-label="相册页面"
+      onKeyDown={(event) => {
+        if (event.key !== 'Enter') return
+        const target = event.target as HTMLElement | null
+        if (!target?.closest('.page-thumbnail')) return
+        event.preventDefault()
+        addBlankPage(selectedPageId ?? document.pages[0]?.id)
+      }}
+    >
       <div className="page-rail-heading">
         <span>页面</span>
         <span>{document.pages.length}</span>
@@ -101,7 +116,12 @@ export function PageRail(): React.JSX.Element {
             </div>
           </div>
         ))}
-        <Button variant="outline" size="sm" className="w-full" onClick={addBlankPage}>
+        <Button
+          variant="outline"
+          size="sm"
+          className="w-full"
+          onClick={() => addBlankPage(document.pages.at(-1)?.id)}
+        >
           <PlusIcon data-icon="inline-start" />
           添加页面
         </Button>

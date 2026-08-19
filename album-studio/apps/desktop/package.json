@@ -7,6 +7,7 @@
   "author": "Album Studio",
   "scripts": {
     "format": "prettier --write .",
+    "download:models": "node scripts/download-models.mjs",
     "lint": "eslint --cache .",
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json --composite false",
     "typecheck:web": "tsc --noEmit -p tsconfig.web.json --composite false",
@@ -21,9 +22,11 @@
     "test": "vitest run && node --test ../../scripts/dev.test.mjs",
     "test:watch": "vitest",
     "test:dev-smoke": "node scripts/dev-smoke.mjs",
-    "test:e2e": "npm run build && playwright test"
+    "test:e2e": "npm run build && playwright test",
+    "test:e2e:packaged": "npm run build:unpack && playwright test packaged-erase.spec.ts brush-alignment.spec.ts"
   },
   "dependencies": {
+    "onnxruntime-node": "1.27.0",
     "sharp": "0.35.3"
   },
   "devDependencies": {

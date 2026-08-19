@@ -51,6 +51,83 @@ export const DEFAULT_DECORATION_BLOCK_TRANSFORM: Readonly<BlockTransform> = Obje
   rotationDeg: 0
 })
 
+export type ImagePixelSize = Readonly<{ width: number; height: number }>
+
+/**
+ * 按原图宽高比计算画布 Block 尺寸：把照片完整放进一个最大框内（contain），
+ * 不裁剪、不拉伸。transform 是页面归一化坐标，视觉比例需要乘上页面宽高比。
+ */
+export function fitImageBlockSize(input: {
+  assetWidth: number
+  assetHeight: number
+  pageWidthMm: number
+  pageHeightMm: number
+  maxWidth?: number
+  maxHeight?: number
+}): ImagePixelSize {
+  const maxWidth = input.maxWidth ?? DEFAULT_IMAGE_BLOCK_TRANSFORM.width
+  const maxHeight = input.maxHeight ?? DEFAULT_IMAGE_BLOCK_TRANSFORM.height
+  if (
+    input.assetWidth <= 0 ||
+    input.assetHeight <= 0 ||
+    input.pageWidthMm <= 0 ||
+    input.pageHeightMm <= 0
+  ) {
+    throw new Error('图片与页面尺寸必须为正数。')
+  }
+  const ratio =
+    (input.assetWidth / input.assetHeight) * (input.pageHeightMm / input.pageWidthMm)
+  if (ratio >= maxWidth / maxHeight) {
+    return { width: maxWidth, height: maxWidth / ratio }
+  }
+  return { width: maxHeight * ratio, height: maxHeight }
+}
+
+/**
+ * 把一组照片按原图比例排成两列流式布局（先放较矮的列），
+ * 全部放入页面后再统一等比缩小，保证不重叠、不越界、比例不变。
+ * 返回按输入顺序对应的 BlockTransform。
+ */
+export function arrangeImageBlocksFree(input: {
+  photos: readonly Readonly<ImagePixelSize>[]
+  pageWidthMm: number
+  pageHeightMm: number
+}): readonly Readonly<BlockTransform>[] {
+  const MARGIN_X = 0.07
+  const MARGIN_Y = 0.07
+  const GAP_X = 0.05
+  const GAP_Y = 0.045
+  const columnWidth = (1 - 2 * MARGIN_X - GAP_X) / 2
+  const columnXs = [MARGIN_X, MARGIN_X + columnWidth + GAP_X]
+
+  const columnOf: number[] = []
+  const naturalHeights: number[] = []
+  const columnYs = [MARGIN_Y, MARGIN_Y]
+  let maxBottom = MARGIN_Y
+
+  for (const photo of input.photos) {
+    const ratio = (photo.width / photo.height) * (input.pageHeightMm / input.pageWidthMm)
+    const height = columnWidth / ratio
+    const column = columnYs[0] <= columnYs[1] ? 0 : 1
+    columnOf.push(column)
+    naturalHeights.push(height)
+    columnYs[column] += height + GAP_Y
+    maxBottom = Math.max(maxBottom, columnYs[column] - GAP_Y)
+  }
+
+  const scale = maxBottom > 1 ? 1 / maxBottom : 1
+  const cursorYs = [MARGIN_Y, MARGIN_Y]
+  return input.photos.map((_, index) => {
+    const column = columnOf[index]
+    const x = columnXs[column] * scale
+    const y = cursorYs[column] * scale
+    const width = columnWidth * scale
+    const height = naturalHeights[index] * scale
+    cursorYs[column] += naturalHeights[index] + GAP_Y
+    return { x, y, width, height, rotationDeg: 0 }
+  })
+}
+
 export const DEFAULT_IMAGE_CROP: Readonly<ImageCrop> = Object.freeze({
   area: Object.freeze({ x: 0, y: 0, width: 100, height: 100 }),
   rotationDeg: 0,
@@ -66,7 +143,10 @@ export const DEFAULT_IMAGE_EFFECTS: Readonly<ImageEffects> = Object.freeze({
   sepia: 0,
   grayscale: 0,
   blurPx: 0,
-  vignette: 0
+  vignette: 0,
+  beautySmooth: 0,
+  beautyWhiten: 0,
+  clarity: 0
 })
 
 export const DEFAULT_IMAGE_MASK: Readonly<ImageMask> = Object.freeze({

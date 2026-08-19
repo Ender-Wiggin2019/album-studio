@@ -1,6 +1,6 @@
 # 电子相册工作室工程
 
-`album-studio` 是 npm workspaces monorepo：Electron 桌面端和 Vite 浏览器端共用一套 React 工作室、相册文档和编辑命令。核心技术包括 Electron 43、React 19、TypeScript 5.9、Vite 7、Tailwind CSS v4、Zustand、Zod、Lexical、dnd-kit、`react-moveable`、`react-easy-crop`、`sharp` 和 `pica`。
+`album-studio` 是 npm workspaces monorepo：Electron 桌面端和 Vite 浏览器端共用一套 React 工作室、相册文档和编辑命令。核心技术包括 Electron 43、React 19、TypeScript 5.9、Vite 7、Tailwind CSS v4、Zustand、Zod、Lexical、dnd-kit、`react-moveable`、`react-image-crop`、`sharp` 和 `pica`。
 
 ## 快速启动
 

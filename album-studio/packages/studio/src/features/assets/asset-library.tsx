@@ -1,19 +1,29 @@
 import {
-  listPageLayouts,
   type AlbumCommand,
-  type AssetRecord,
-  type PageLayoutId
+  type AssetRecord
 } from '@album-studio/common'
-import { FolderPlusIcon, ImagePlusIcon, ImagesIcon, SearchIcon, XIcon } from 'lucide-react'
-import { useDeferredValue, useMemo, useState } from 'react'
+import {
+  EyeIcon,
+  FolderPlusIcon,
+  ImagePlusIcon,
+  ImagesIcon,
+  Maximize2Icon,
+  Minimize2Icon,
+  SearchIcon,
+  XIcon
+} from 'lucide-react'
+import { useDeferredValue, useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
+import type { ImportCandidate } from '@/app/platform/studio-platform'
 import { useStudioPlatform } from '@/app/platform/use-studio-platform'
 import { useStudioStore } from '@/app/store'
 import { useDraggableBlockSource } from '@/features/block-placement/draggable-block-source'
 import { buildAddBlockCommand } from '@/features/block-placement/drop-coordinate'
 import { AssetImage } from '@/shared/assets/asset-image'
+import { cn } from '@/shared/lib/cn'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
+import { PhotoPreviewOverlay, type PhotoPreviewItem } from './photo-preview-overlay'
 import {
   Dialog,
   DialogBody,
@@ -32,12 +42,9 @@ import {
   SelectTrigger,
   SelectValue
 } from '@/components/ui/select'
+import { ImportCandidatesDialog } from './import-candidates-dialog'
 
 type SortMode = 'name' | 'imported'
-
-function pureImageLayoutForCount(count: number): PageLayoutId | undefined {
-  return listPageLayouts({ pageKind: 'content', imageCount: count, richTextCount: 0 })[0]?.id
-}
 
 function chunks<T>(items: readonly T[], size: number): T[][] {
   return Array.from({ length: Math.ceil(items.length / size) }, (_, index) =>
@@ -55,6 +62,7 @@ function ProjectAssetCard({
   relinking,
   onAdd,
   onToggle,
+  onView,
   onRelink,
   onMissing,
   onAvailable
@@ -68,6 +76,7 @@ function ProjectAssetCard({
   relinking: boolean
   onAdd: () => void
   onToggle: () => void
+  onView: () => void
   onRelink: () => void
   onMissing: () => void
   onAvailable: () => void
@@ -122,14 +131,25 @@ function ProjectAssetCard({
         </div>
       </button>
       {!missing ? (
-        <span className="absolute left-1.5 top-1.5">
-          <Checkbox
-            checked={selected}
-            onCheckedChange={onToggle}
-            aria-label={`选择 ${asset.fileName}`}
-            title="加入批量选择"
-          />
-        </span>
+        <>
+          <span className="absolute left-1.5 top-1.5">
+            <Checkbox
+              checked={selected}
+              onCheckedChange={onToggle}
+              aria-label={`选择 ${asset.fileName}`}
+              title="加入批量选择"
+            />
+          </span>
+          <button
+            type="button"
+            onClick={onView}
+            aria-label={`查看大图 ${asset.fileName}`}
+            title="查看大图"
+            className="absolute right-1.5 top-1.5 cursor-pointer rounded bg-background/85 p-1 text-muted-foreground shadow-xs transition-colors hover:bg-background hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <EyeIcon className="size-3.5" />
+          </button>
+        </>
       ) : null}
     </div>
   )
@@ -153,9 +173,12 @@ export function ProjectAssetsPanel(): React.JSX.Element {
   const deferredQuery = useDeferredValue(query)
   const [sortMode, setSortMode] = useState<SortMode>('name')
   const [importing, setImporting] = useState(false)
+  const [candidates, setCandidates] = useState<ImportCandidate[] | null>(null)
   const [destinationOpen, setDestinationOpen] = useState(false)
   const [lastSkipped, setLastSkipped] = useState<Array<{ fileName: string; reason: string }>>([])
   const [relinkingAssetId, setRelinkingAssetId] = useState<string | null>(null)
+  const [expanded, setExpanded] = useState(false)
+  const [previewIndex, setPreviewIndex] = useState<number | null>(null)
   const canImportFolder = platform.capabilities.has('folder-import')
   const canRelink = platform.capabilities.has('asset-relink')
 
@@ -173,14 +196,37 @@ export function ProjectAssetsPanel(): React.JSX.Element {
       )
   }, [deferredQuery, document, sortMode])
 
+  useEffect(() => {
+    if (!expanded || previewIndex !== null || candidates !== null || destinationOpen) return
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') {
+        event.stopPropagation()
+        event.stopImmediatePropagation()
+        setExpanded(false)
+      }
+    }
+    window.addEventListener('keydown', onKeyDown, true)
+    return () => window.removeEventListener('keydown', onKeyDown, true)
+  }, [candidates, destinationOpen, expanded, previewIndex])
+
   if (!document) return <div />
   const selectedPage = document.pages.find((page) => page.id === selectedPageId)
   const currentCapacity = selectedPage ? Math.max(0, 100 - selectedPage.blocks.length) : 0
 
-  const importAssets = async (source: 'files' | 'folder'): Promise<void> => {
+  const pickCandidates = async (source: 'files' | 'folder'): Promise<void> => {
+    try {
+      const picked = await platform.assets.pickCandidates(document.id, source)
+      if (!picked || picked.length === 0) return
+      setCandidates(picked)
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '选择照片失败')
+    }
+  }
+
+  const importSelectedCandidates = async (candidateIds: string[]): Promise<void> => {
     setImporting(true)
     try {
-      const result = await platform.assets.import(document.id, source)
+      const result = await platform.assets.importCandidates(document.id, candidateIds)
       if (!result) return
       setLastSkipped(result.skipped)
       if (result.assets.length) {
@@ -196,7 +242,13 @@ export function ProjectAssetsPanel(): React.JSX.Element {
       toast.error(error instanceof Error ? error.message : '导入照片失败')
     } finally {
       setImporting(false)
+      closeCandidatesDialog()
     }
+  }
+
+  const closeCandidatesDialog = (): void => {
+    if (candidates) platform.assets.releaseCandidates(candidates.map((candidate) => candidate.id))
+    setCandidates(null)
   }
 
   const relinkAsset = async (assetId: string): Promise<void> => {
@@ -216,25 +268,23 @@ export function ProjectAssetsPanel(): React.JSX.Element {
 
   const addAssetToCurrentPage = (assetId: string): void => {
     if (!selectedPage) return
-    dispatch(buildAddBlockCommand(selectedPage.id, { kind: 'asset', assetId }))
+    const asset = document.assets.find((candidate) => candidate.id === assetId)
+    dispatch(
+      buildAddBlockCommand(selectedPage.id, { kind: 'asset', assetId }, {
+        assetSize: asset ? { width: asset.width, height: asset.height } : undefined,
+        pageSpec: document.pageSpec
+      })
+    )
   }
 
   const placeOnCurrentPage = (): void => {
     if (!selectedPage || selectedAssetIds.length === 0) return
     const accepted = selectedAssetIds.slice(0, currentCapacity)
     if (accepted.length === 0) return
-    const imageCount =
-      selectedPage.blocks.filter((block) => block.type === 'image').length + accepted.length
-    const richTextCount = selectedPage.blocks.filter((block) => block.type === 'rich-text').length
-    const layoutId =
-      selectedPage.kind === 'content' && richTextCount === 0
-        ? pureImageLayoutForCount(imageCount)
-        : undefined
     dispatch({
       type: 'place-assets',
       pageId: selectedPage.id,
-      assetIds: accepted,
-      ...(layoutId ? { layoutId } : {})
+      assetIds: accepted
     })
     setAssetSelection(selectedAssetIds.slice(accepted.length))
     setDestinationOpen(false)
@@ -244,15 +294,11 @@ export function ProjectAssetsPanel(): React.JSX.Element {
     const groups = chunks(selectedAssetIds, 6)
     const firstCreatedPageIndex = document.pages.length
     const afterPageId = document.pages.at(-1)?.id
-    const commands: AlbumCommand[] = [...groups].reverse().map((group) => {
-      const layoutId = pureImageLayoutForCount(group.length)
-      return {
-        type: 'add-page',
-        ...(afterPageId ? { afterPageId } : {}),
-        assetIds: group,
-        ...(layoutId ? { layoutId } : {})
-      }
-    })
+    const commands: AlbumCommand[] = [...groups].reverse().map((group) => ({
+      type: 'add-page',
+      ...(afterPageId ? { afterPageId } : {}),
+      assetIds: group
+    }))
     dispatchMany(commands)
     const firstCreatedPageId = useStudioStore.getState().document?.pages[firstCreatedPageIndex]?.id
     if (firstCreatedPageId) selectPage(firstCreatedPageId)
@@ -264,9 +310,38 @@ export function ProjectAssetsPanel(): React.JSX.Element {
   const allVisibleSelected =
     visibleIds.length > 0 && visibleIds.every((id) => selectedAssetIds.includes(id))
 
+  const previewItems: PhotoPreviewItem[] = assets
+    .filter((asset) => !missingAssetIds.includes(asset.id))
+    .map((asset) => ({
+      id: asset.id,
+      label: asset.fileName,
+      renderLarge: () => (
+        <AssetImage
+          documentId={document.id}
+          assetId={asset.id}
+          sourceRequest={{ quality: 'preview' }}
+          alt={asset.fileName}
+          className="max-h-[82dvh] max-w-[86vw] object-contain"
+        />
+      ),
+      renderFooter: () => (
+        <Button
+          size="sm"
+          onClick={() => addAssetToCurrentPage(asset.id)}
+          disabled={!selectedPage || currentCapacity === 0}
+        >
+          <ImagePlusIcon data-icon="inline-start" />
+          添加到当前页
+        </Button>
+      )
+    }))
+
   return (
     <section
-      className="relative flex h-full min-h-0 w-[360px] max-w-full flex-col overflow-hidden bg-background"
+      className={cn(
+        'relative flex min-h-0 flex-col overflow-hidden bg-background',
+        expanded ? 'fixed inset-0 z-50 w-auto' : 'h-full w-[360px] max-w-full'
+      )}
       aria-label="项目素材"
     >
       <div className="shrink-0 border-b p-3">
@@ -291,7 +366,7 @@ export function ProjectAssetsPanel(): React.JSX.Element {
             </button>
           ) : null}
         </div>
-        <div className="mt-2 grid grid-cols-[1fr_auto_auto] gap-1.5">
+        <div className="mt-2 grid grid-cols-[1fr_auto_auto_auto] gap-1.5">
           <Select value={sortMode} onValueChange={(value) => setSortMode(value as SortMode)}>
             <SelectTrigger className="h-8 min-w-0 text-xs" aria-label="照片排序">
               <SelectValue />
@@ -304,7 +379,7 @@ export function ProjectAssetsPanel(): React.JSX.Element {
           <Button
             variant="outline"
             size="icon-sm"
-            onClick={() => void importAssets('files')}
+            onClick={() => void pickCandidates('files')}
             disabled={importing}
             aria-label="选择图片"
             title="选择图片"
@@ -315,7 +390,7 @@ export function ProjectAssetsPanel(): React.JSX.Element {
             <Button
               variant="outline"
               size="icon-sm"
-              onClick={() => void importAssets('folder')}
+              onClick={() => void pickCandidates('folder')}
               disabled={importing}
               aria-label="选择照片文件夹"
               title="选择照片文件夹"
@@ -323,6 +398,15 @@ export function ProjectAssetsPanel(): React.JSX.Element {
               <FolderPlusIcon />
             </Button>
           ) : null}
+          <Button
+            variant="outline"
+            size="icon-sm"
+            onClick={() => setExpanded((value) => !value)}
+            aria-label={expanded ? '退出全屏' : '全屏查看素材'}
+            title={expanded ? '退出全屏' : '全屏查看素材'}
+          >
+            {expanded ? <Minimize2Icon /> : <Maximize2Icon />}
+          </Button>
         </div>
       </div>
 
@@ -361,7 +445,7 @@ export function ProjectAssetsPanel(): React.JSX.Element {
             <Button
               className="mt-4"
               size="sm"
-              onClick={() => void importAssets(canImportFolder ? 'folder' : 'files')}
+              onClick={() => void pickCandidates(canImportFolder ? 'folder' : 'files')}
               disabled={importing}
             >
               <ImagePlusIcon data-icon="inline-start" />
@@ -395,7 +479,7 @@ export function ProjectAssetsPanel(): React.JSX.Element {
             </label>
             <span className="text-[11px] text-muted-foreground">{assets.length} 张</span>
           </div>
-          <div className="grid grid-cols-2 gap-2">
+          <div className={cn('grid gap-2', expanded ? 'grid-cols-3 sm:grid-cols-4 lg:grid-cols-5' : 'grid-cols-2')}>
             {assets.map((asset) => (
               <ProjectAssetCard
                 key={asset.id}
@@ -408,6 +492,10 @@ export function ProjectAssetsPanel(): React.JSX.Element {
                 relinking={relinkingAssetId === asset.id}
                 onAdd={() => addAssetToCurrentPage(asset.id)}
                 onToggle={() => toggleAsset(asset.id)}
+                onView={() => {
+                  const previewAssetIndex = previewItems.findIndex((item) => item.id === asset.id)
+                  if (previewAssetIndex >= 0) setPreviewIndex(previewAssetIndex)
+                }}
                 onRelink={() => void relinkAsset(asset.id)}
                 onMissing={() => markAssetMissing(asset.id)}
                 onAvailable={() => markAssetAvailable(asset.id)}
@@ -434,6 +522,21 @@ export function ProjectAssetsPanel(): React.JSX.Element {
           </Button>
         </div>
       ) : null}
+
+      <ImportCandidatesDialog
+        open={candidates !== null}
+        candidates={candidates ?? []}
+        importing={importing}
+        onConfirm={(candidateIds) => void importSelectedCandidates(candidateIds)}
+        onClose={closeCandidatesDialog}
+      />
+
+      <PhotoPreviewOverlay
+        items={previewItems}
+        index={previewIndex}
+        onIndexChange={setPreviewIndex}
+        onClose={() => setPreviewIndex(null)}
+      />
 
       <Dialog open={destinationOpen} onOpenChange={setDestinationOpen}>
         <DialogContent>

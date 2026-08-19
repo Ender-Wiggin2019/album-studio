@@ -11,10 +11,15 @@ import {
   DEFAULT_IMAGE_MASK,
   DEFAULT_PAGE_SPEC,
   DecorationSchema,
+  ErasePointSchema,
+  EraseStrokeSchema,
+  FREE_FORM_LAYOUT_ID,
   ICON_RESOURCE_IDS,
+  ImageBlockSchema,
   ImageCaptionSchema,
   ImageCropSchema,
   ImageEffectsSchema,
+  ImageEraseSchema,
   ImageMaskSchema,
   MAX_RICH_TEXT_CHARACTERS,
   MAX_RICH_TEXT_NODES,
@@ -82,9 +87,10 @@ function plainText(document: RichTextDocument): string {
 }
 
 describe('AlbumDocument v2 schema', () => {
-  it('defines three strict physical page presets and defaults to A4 landscape', () => {
+  it('defines four strict physical page presets and defaults to A4 landscape', () => {
     expect(PAGE_SPEC_PRESETS).toEqual([
       { presetId: 'a4-landscape', widthMm: 297, heightMm: 210 },
+      { presetId: 'a4-portrait', widthMm: 210, heightMm: 297 },
       { presetId: 'square-12', widthMm: 304.8, heightMm: 304.8 },
       { presetId: 'widescreen-16-9', widthMm: 338.67, heightMm: 190.5 }
     ])
@@ -124,11 +130,13 @@ describe('AlbumDocument v2 schema', () => {
     ).toEqual(['夏日旅行', '把值得记住的时刻，装订成册。', '2026.08.15'])
     expect(AlbumDocumentSchema.parse(document)).toEqual(document)
 
+    const squarePreset = PAGE_SPEC_PRESETS.find((preset) => preset.presetId === 'square-12')
+    if (!squarePreset) throw new Error('找不到方形预设')
     const square = createAlbumDocument(
-      { title: '方形相册', now: NOW, pageSpec: PAGE_SPEC_PRESETS[1] },
+      { title: '方形相册', now: NOW, pageSpec: squarePreset },
       idFactory()
     )
-    expect(square.pageSpec).toEqual(PAGE_SPEC_PRESETS[1])
+    expect(square.pageSpec).toEqual(squarePreset)
   })
 
   it('uses a clean domain error for old versions and Zod errors for damaged v2 data', () => {
@@ -219,6 +227,16 @@ describe('AlbumDocument v2 schema', () => {
         beauty: 1
       }).success
     ).toBe(false)
+    expect(
+      ImageEffectsSchema.safeParse({
+        ...DEFAULT_IMAGE_EFFECTS,
+        beautySmooth: 1.5,
+        beautyWhiten: -0.2
+      }).success
+    ).toBe(false)
+    expect(
+      ImageEffectsSchema.safeParse({ ...DEFAULT_IMAGE_EFFECTS, clarity: 1.5 }).success
+    ).toBe(false)
     expect(ImageMaskSchema.safeParse({ kind: 'rounded', radius: 12 }).success).toBe(false)
     expect(
       ImageCaptionSchema.safeParse({
@@ -236,6 +254,72 @@ describe('AlbumDocument v2 schema', () => {
         legacyPosition: 'bottom'
       }).success
     ).toBe(false)
+  })
+
+  it('effects 缺少后加字段（beautySmooth/beautyWhiten/clarity）时按默认值 0 解析，旧项目可继续打开', () => {
+    const legacyEffects = {
+      brightness: 1,
+      contrast: 1,
+      saturation: 1,
+      hueDeg: 0,
+      sepia: 0,
+      grayscale: 0,
+      blurPx: 0,
+      vignette: 0
+    }
+    const parsed = ImageEffectsSchema.safeParse(legacyEffects)
+    expect(parsed.success).toBe(true)
+    if (parsed.success) {
+      expect(parsed.data.beautySmooth).toBe(0)
+      expect(parsed.data.beautyWhiten).toBe(0)
+      expect(parsed.data.clarity).toBe(0)
+    }
+  })
+
+  it('keeps image erase optional and strictly validates erase parameters', () => {
+    const erase = {
+      autoDetect: true,
+      strokes: [
+        { mode: 'add', size: 0.05, points: [{ x: 0.5, y: 0.5 }, { x: 0.6, y: 0.55 }] },
+        { mode: 'subtract', size: 0.03, points: [{ x: 0.5, y: 0.5 }, { x: 0.48, y: 0.52 }] }
+      ]
+    }
+    expect(ImageEraseSchema.parse(erase)).toEqual(erase)
+    expect(ErasePointSchema.parse({ x: 0, y: 1 })).toEqual({ x: 0, y: 1 })
+    expect(EraseStrokeSchema.parse({ mode: 'add', size: 1, points: [{ x: 0, y: 0 }, { x: 1, y: 1 }] })).toMatchObject({
+      mode: 'add'
+    })
+
+    // 旧项目没有 erase 字段仍可解析；带 erase 可解析
+    const block = createImageBlock('asset-1', undefined, idFactory())
+    expect(ImageBlockSchema.parse(block)).toEqual(block)
+    expect(ImageBlockSchema.parse({ ...block, erase })).toMatchObject({ erase })
+
+    // 严格拒绝：未知字段、越界坐标、非法笔刷尺寸、单点笔划、空笔划
+    expect(ImageEraseSchema.safeParse({ ...erase, maskKind: 'circle' }).success).toBe(false)
+    expect(
+      ImageEraseSchema.safeParse({
+        autoDetect: false,
+        strokes: [{ mode: 'add', size: 0.05, points: [{ x: 1.5, y: 0.5 }, { x: 0.6, y: 0.55 }] }]
+      }).success
+    ).toBe(false)
+    expect(
+      ImageEraseSchema.safeParse({
+        autoDetect: false,
+        strokes: [{ mode: 'add', size: 0, points: [{ x: 0.5, y: 0.5 }, { x: 0.6, y: 0.55 }] }]
+      }).success
+    ).toBe(false)
+    expect(
+      ImageEraseSchema.safeParse({
+        autoDetect: false,
+        strokes: [{ mode: 'add', size: 0.05, points: [{ x: 0.5, y: 0.5 }] }]
+      }).success
+    ).toBe(false)
+    // 纯自动识别（无笔划）是合法场景
+    expect(ImageEraseSchema.safeParse({ autoDetect: true, strokes: [] }).success).toBe(true)
+    expect(ImageBlockSchema.safeParse({ ...block, erase: { autoDetect: true, extra: 1 } }).success).toBe(
+      false
+    )
   })
 
   it('enforces normalized page geometry for every block and layout slot', () => {
@@ -471,7 +555,9 @@ describe('AlbumDocument v2 schema', () => {
   })
 
   it('registers seven image layouts and three content-only mixed layouts', () => {
-    expect(PAGE_LAYOUTS.map((layout) => layout.id)).toEqual(PAGE_LAYOUT_IDS)
+    expect(PAGE_LAYOUTS.map((layout) => layout.id)).toEqual(
+      PAGE_LAYOUT_IDS.filter((layoutId) => layoutId !== FREE_FORM_LAYOUT_ID)
+    )
     expect(PAGE_LAYOUTS).toHaveLength(10)
     for (const layout of PAGE_LAYOUTS) {
       expect(layout.supportedPageKinds).toEqual(['content'])
@@ -526,5 +612,22 @@ describe('AlbumDocument v2 schema', () => {
     const coverLayout = structuredClone(document)
     coverLayout.pages[0].layoutId = 'focus'
     expect(AlbumDocumentSchema.safeParse(coverLayout).success).toBe(false)
+  })
+
+  it('accepts free-form layoutId without fixed-slot matching', () => {
+    const ids = idFactory()
+    const document = createAlbumDocument({ title: '自由布局', now: NOW }, ids)
+    document.assets.push(asset())
+    const page = createContentPage(ids)
+    page.layoutId = FREE_FORM_LAYOUT_ID
+    page.blocks.push(
+      createImageBlock(
+        'asset-1',
+        { x: 0.1, y: 0.1, width: 0.42, height: 0.3, rotationDeg: 0 },
+        ids
+      )
+    )
+    document.pages.push(page)
+    expect(AlbumDocumentSchema.parse(document)).toEqual(document)
   })
 })

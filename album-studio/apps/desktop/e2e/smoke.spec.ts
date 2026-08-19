@@ -161,10 +161,9 @@ test.describe('电子相册工作室', () => {
     })
     await page.waitForLoadState('networkidle')
     await expect(page).toHaveTitle('电子相册工作室')
-    await expect(
-      page.getByRole('heading', { name: '把散落的照片，编排成一本真正的相册。' })
-    ).toBeVisible()
-    await expect(page.getByRole('button', { name: /端到端测试相册/ })).toBeVisible()
+    // 启动后自动继续打开最近编辑过的相册，不再停留在项目首页
+    await expect(page.locator('.project-identity')).toContainText('端到端测试相册')
+    await expect(page.getByText('已保存', { exact: true })).toBeVisible()
 
     const sandbox = await page.evaluate(() => ({
       requireType: typeof (globalThis as { require?: unknown }).require,
@@ -176,10 +175,8 @@ test.describe('电子相册工作室', () => {
       processType: 'undefined',
       hasAlbumApi: true
     })
-    await page.screenshot({ path: testInfo.outputPath('home-1440x900.png') })
+    await page.screenshot({ path: testInfo.outputPath('workspace-1440x900.png') })
 
-    await page.getByRole('button', { name: /端到端测试相册/ }).click()
-    await expect(page.getByText('已保存', { exact: true })).toBeVisible()
     await expect(page.getByRole('button', { name: '导出 PDF' })).toBeVisible()
     await page
       .getByRole('complementary', { name: '相册页面' })
@@ -240,18 +237,41 @@ test.describe('电子相册工作室', () => {
         return photoEditor.isVisible()
       })
       .toBe(true)
-    const cropperImage = photoEditor.locator('.reactEasyCrop_Image')
+    const cropperImage = photoEditor.locator('.album-edit-source-image')
     await expect(cropperImage).toBeVisible()
     await expect
       .poll(() => cropperImage.evaluate((image: HTMLImageElement) => image.naturalWidth))
       .toBeGreaterThan(0)
     const sliders = photoEditor.getByRole('slider')
-    await expect(sliders).toHaveCount(10)
+    await expect(sliders).toHaveCount(12)
+    // 自由裁剪：把东南角手柄向内拖，生成 <100% 的裁剪区域
+    const cropSelection = photoEditor.locator('.ReactCrop__crop-selection')
+    await expect(cropSelection).toBeVisible()
+    const seHandle = cropSelection.locator('[data-ord="se"]')
+    const handleBox = await seHandle.boundingBox()
+    const selectionBox = await cropSelection.boundingBox()
+    if (!handleBox || !selectionBox) throw new Error('无法测量自由裁剪框')
+    await page.mouse.move(handleBox.x + handleBox.width / 2, handleBox.y + handleBox.height / 2)
+    await page.mouse.down()
+    await page.mouse.move(
+      selectionBox.x + selectionBox.width * 0.45,
+      selectionBox.y + selectionBox.height * 0.45,
+      { steps: 8 }
+    )
+    await page.mouse.up()
     await sliders.nth(0).focus()
-    for (let index = 0; index < 10; index += 1) await page.keyboard.press('ArrowRight')
-    await sliders.nth(1).focus()
     for (let index = 0; index < 12; index += 1) await page.keyboard.press('ArrowRight')
     await photoEditor.getByRole('button', { name: '暖阳' }).click()
+    // 自动美化：只修正亮度/对比度/饱和度，保留暖阳的复古与暗角；分析期间按钮禁用
+    await expect(photoEditor.getByRole('button', { name: '自动美化' })).toBeEnabled()
+    await photoEditor.getByRole('button', { name: '自动美化' }).click()
+    await expect(photoEditor.getByRole('button', { name: '自动美化' })).toBeEnabled()
+    await sliders.nth(9).focus()
+    for (let index = 0; index < 30; index += 1) await page.keyboard.press('ArrowRight')
+    await sliders.nth(10).focus()
+    for (let index = 0; index < 20; index += 1) await page.keyboard.press('ArrowRight')
+    await sliders.nth(11).focus()
+    for (let index = 0; index < 15; index += 1) await page.keyboard.press('ArrowRight')
     await photoEditor.getByRole('button', { name: '水平翻转' }).click()
     await page.screenshot({ path: testInfo.outputPath('photo-editor-1440x900.png') })
     await photoEditor.getByRole('button', { name: '应用到照片' }).click()
@@ -267,7 +287,10 @@ test.describe('电子相册工作室', () => {
               rotationDeg: element.crop.rotationDeg,
               cropWidth: element.crop.area.width,
               sepia: element.effects.sepia,
-              vignette: element.effects.vignette
+              vignette: element.effects.vignette,
+              beautySmooth: element.effects.beautySmooth,
+              beautyWhiten: element.effects.beautyWhiten,
+              clarity: element.effects.clarity
             }
           : null
       })
@@ -275,12 +298,24 @@ test.describe('电子相册工作室', () => {
         flipX: true,
         rotationDeg: 12,
         sepia: 0.14,
-        vignette: 0.08
+        vignette: 0.08,
+        beautySmooth: 0.3,
+        beautyWhiten: 0.2,
+        clarity: 0.15
       })
     const edited = await readManifest(seeded.manifestPath)
     const editedPage = edited.pages[1]
     expect(editedPage.kind).toBe('content')
     if (editedPage.kind !== 'content') throw new Error('图片编辑后内容页类型错误')
+    // 自动美化只修正亮度/对比度/饱和度：三个参数不再等于暖阳预设值，且复古/暗角保留
+    const autoEffects = firstImageBlock(edited, 1).effects
+    expect([autoEffects.brightness, autoEffects.contrast, autoEffects.saturation]).not.toEqual([
+      1.06,
+      1.03,
+      1.08
+    ])
+    expect(autoEffects.sepia).toBe(0.14)
+    expect(autoEffects.vignette).toBe(0.08)
     expect(
       Math.min(
         firstImageBlock(edited, 1).crop.area.width,
@@ -339,6 +374,10 @@ test.describe('电子相册工作室', () => {
     )
 
     const page = await app.firstWindow()
+    // 自动继续打开种子相册后，先返回首页再走新建流程
+    await expect(page.getByRole('button', { name: '返回项目首页' })).toBeVisible()
+    await page.getByRole('button', { name: '返回项目首页' }).click()
+    await expect(page.getByRole('button', { name: '新建相册' }).first()).toBeVisible()
     await page.getByRole('button', { name: '新建相册' }).first().click()
     await page.getByLabel('相册名称').fill('新建流程相册')
     await page.getByRole('radio', { name: /12 寸方形/ }).click()
@@ -348,6 +387,11 @@ test.describe('电子相册工作室', () => {
 
     await page.getByRole('tab', { name: /素材/ }).click()
     await page.getByRole('button', { name: '选择照片文件夹' }).first().click()
+    await expect(page.getByRole('heading', { name: '选择要导入的照片' })).toBeVisible({
+      timeout: 30_000
+    })
+    await page.getByRole('checkbox', { name: '选择 新照片.png' }).click()
+    await page.getByRole('button', { name: /导入所选/ }).click()
     await expect(page.getByRole('button', { name: /添加 新照片\.png 到当前页/ })).toBeVisible({
       timeout: 30_000
     })
@@ -370,7 +414,7 @@ test.describe('电子相册工作室', () => {
     })
     expect(created.assets).toHaveLength(1)
     expect(created.pages).toHaveLength(2)
-    expect(created.pages[1]).toMatchObject({ kind: 'content', layoutId: 'focus' })
+    expect(created.pages[1]).toMatchObject({ kind: 'content', layoutId: null })
     expect(JSON.stringify(created)).not.toContain('originalRelativePath')
     expect(JSON.stringify(created)).not.toContain('slots')
     expect(
@@ -392,7 +436,7 @@ test.describe('电子相册工作室', () => {
     await expect(page.getByText('第 1 页 · 1 个 Block', { exact: true })).toBeVisible()
     const reopened = await readManifest(manifestPath)
     expect(reopened.assets).toHaveLength(1)
-    expect(reopened.pages[1]).toMatchObject({ kind: 'content', layoutId: 'focus' })
+    expect(reopened.pages[1]).toMatchObject({ kind: 'content', layoutId: null })
 
     const squarePdf = testInfo.outputPath('方形相册.pdf')
     await app.evaluate(({ dialog }, outputPath) => {
@@ -435,11 +479,36 @@ test.describe('电子相册工作室', () => {
       timeout: 30_000
     })
     await expectPdfMediaBox(widescreenPdf, 338.67, 190.5)
+
+    await page.getByRole('button', { name: '关闭' }).click()
+    await page.getByRole('button', { name: '返回项目首页' }).click()
+    await page.getByRole('button', { name: '新建相册' }).first().click()
+    await page.getByLabel('相册名称').fill('竖排流程相册')
+    await page.getByRole('radio', { name: /A4 竖排/ }).click()
+    await page.getByRole('button', { name: '创建相册' }).click()
+    await expect(page.locator('.project-identity')).toContainText('竖排流程相册')
+    const portraitManifestPath = join(projectParent, '竖排流程相册.album-project', 'manifest.json')
+    await expect
+      .poll(async () => (await readManifest(portraitManifestPath)).pageSpec.presetId)
+      .toBe('a4-portrait')
+
+    const portraitPdf = testInfo.outputPath('竖排相册.pdf')
+    await app.evaluate(({ dialog }, outputPath) => {
+      Object.defineProperty(dialog, 'showSaveDialog', {
+        configurable: true,
+        value: async () => ({ canceled: false, filePath: outputPath })
+      })
+    }, portraitPdf)
+    await page.getByRole('button', { name: '导出 PDF' }).click()
+    await expect(page.getByText('竖排流程相册.pdf 已准备好', { exact: true })).toBeVisible({
+      timeout: 30_000
+    })
+    await expectPdfMediaBox(portraitPdf, 210, 297)
   })
 
   test('关闭窗口前提交仍在聚焦的照片说明与富文本', async () => {
     const page = await app.firstWindow()
-    await page.getByRole('button', { name: /端到端测试相册/ }).click()
+    await expect(page.getByText('已保存', { exact: true })).toBeVisible()
     await page
       .getByRole('complementary', { name: '相册页面' })
       .getByRole('button', { name: '第 1 页 · 1 个 Block', exact: true })
@@ -477,5 +546,71 @@ test.describe('电子相册工作室', () => {
         caption: '关闭前最后输入',
         richText: expect.stringContaining('关闭前最后富文本')
       })
+  })
+
+  test('消除人物：自动识别、应用修补、确认后写入文档并渲染修补图', async ({ browserName }, testInfo) => {
+    expect(browserName).toBe('chromium')
+    const page = await app.firstWindow()
+    const runtimeErrors: string[] = []
+    page.on('pageerror', (error) => runtimeErrors.push(error.stack ?? error.message))
+    await page.waitForLoadState('networkidle')
+    // 启动后自动继续打开种子相册
+    await expect(page.getByText('已保存', { exact: true })).toBeVisible()
+
+    await page
+      .getByRole('complementary', { name: '相册页面' })
+      .getByRole('button', { name: '第 1 页 · 1 个 Block', exact: true })
+      .click()
+    const firstElement = firstImageBlock(seeded.document, 1)
+    const imageElement = page
+      .getByRole('region', { name: '相册画布' })
+      .locator(`[data-block-id="${firstElement.id}"]`)
+    await expect(imageElement).toBeVisible()
+    await imageElement.click()
+    await expect(page.locator('.moveable-control-box')).toBeVisible()
+
+    await page
+      .getByRole('complementary', { name: '装帧托盘' })
+      .getByRole('button', { name: '消除人物' })
+      .click()
+    const eraseWorkspace = page.getByRole('region', { name: '消除人物' })
+    await expect(eraseWorkspace).toBeVisible()
+    await page.screenshot({ path: testInfo.outputPath('erase-edit-1440x900.png') })
+
+    await eraseWorkspace.getByRole('button', { name: '自动识别人物' }).click()
+    await expect(eraseWorkspace.getByRole('button', { name: /已识别/ })).toBeVisible({
+      timeout: 30_000
+    })
+
+    await eraseWorkspace.getByRole('button', { name: '应用消除' }).click()
+    await expect(eraseWorkspace.getByRole('button', { name: '确认应用' })).toBeVisible({
+      timeout: 60_000
+    })
+    await page.screenshot({ path: testInfo.outputPath('erase-preview-1440x900.png') })
+    await eraseWorkspace.getByRole('button', { name: '确认应用' }).click()
+
+    await expect
+      .poll(async () => {
+        if (runtimeErrors.length) {
+          throw new Error(`消除流程运行时错误：\n${runtimeErrors.join('\n')}`)
+        }
+        const saved = await readManifest(seeded.manifestPath)
+        const block = firstImageBlock(saved, 1)
+        return block.erase
+      })
+      .toMatchObject({ autoDetect: true })
+    const saved = await readManifest(seeded.manifestPath)
+    expect(saved.pages[1].blocks).toContainEqual(
+      expect.objectContaining({ id: firstElement.id, erase: expect.any(Object) })
+    )
+
+    // 画布渲染修补图（quality=erased 请求成功，未回退原图）
+    await expect(imageElement).toBeVisible()
+    const imageSource = imageElement.locator('img')
+    await expect
+      .poll(async () => imageSource.getAttribute('src'))
+      .toContain('quality=erased')
+    await expect.poll(async () => imageSource.getAttribute('src')).toContain('erase=')
+    await expect(page.getByText('图片文件不可用')).toHaveCount(0)
   })
 })

@@ -9,6 +9,7 @@ type OpenedProject = {
 type AssetUsage = {
   width?: number
   height?: number
+  eraseKey?: string
 }
 
 /**
@@ -33,6 +34,10 @@ export function createDesktopPlatform(api: AlbumStudioApi = window.albumStudio):
   }
 
   const assetUsage = (request: AssetSourceRequest): AssetUsage | undefined => {
+    if (request.quality === 'erased') {
+      if (!request.eraseKey) return undefined
+      return { eraseKey: request.eraseKey }
+    }
     if (request.quality !== 'print') return undefined
     const width = request.pageWidthRatio
     const height = request.pageHeightRatio
@@ -49,7 +54,8 @@ export function createDesktopPlatform(api: AlbumStudioApi = window.albumStudio):
       'folder-import',
       'native-pdf',
       'asset-relink',
-      'durable-project-folder'
+      'durable-project-folder',
+      'erase-people'
     ]),
     projects: {
       async listRecent(): Promise<RecentStudioProject[]> {
@@ -75,8 +81,14 @@ export function createDesktopPlatform(api: AlbumStudioApi = window.albumStudio):
       }
     },
     assets: {
-      async import(documentId, source) {
-        return api.assets.import({ projectPath: pathFor(documentId), source })
+      async pickCandidates(documentId, source) {
+        return api.assets.pickCandidates({ projectPath: pathFor(documentId), source })
+      },
+      async importCandidates(documentId, candidateIds) {
+        return api.assets.importCandidates({ projectPath: pathFor(documentId), candidateIds })
+      },
+      async releaseCandidates(candidateIds) {
+        return api.assets.releaseCandidates({ candidateIds })
       },
       async relink(documentId, assetId) {
         return api.assets.relink({ projectPath: pathFor(documentId), assetId })
@@ -96,6 +108,14 @@ export function createDesktopPlatform(api: AlbumStudioApi = window.albumStudio):
           revision: document.revision
         })
         return result ? { displayName: `${document.title}.pdf`, byteSize: result.byteSize } : null
+      }
+    },
+    imageErase: {
+      async detect(documentId, assetId) {
+        return api.imageErase.detect({ projectPath: pathFor(documentId), assetId })
+      },
+      async apply(documentId, assetId, erase) {
+        return api.imageErase.apply({ projectPath: pathFor(documentId), assetId, erase })
       }
     },
     lifecycle: {

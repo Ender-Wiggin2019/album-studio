@@ -14,6 +14,8 @@ import { tmpdir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
 import sharp from 'sharp'
 import { afterEach, describe, expect, it } from 'vitest'
+// Windows 上 libvips 会缓存已打开文件的句柄，导致 metadata 读取后的 unlink 报 EBUSY；测试内禁用缓存以释放句柄。
+sharp.cache(false)
 import type { PageSpec } from '@album-studio/common'
 import {
   derivativeRelativePath,
@@ -193,6 +195,44 @@ describe('ImageStore', () => {
       height: 263
     })
     expect(basename(printPath)).toBe('print-351x248.webp')
+  })
+
+  it('stores erased results and only serves them read-only', async () => {
+    const root = await temporaryRoot()
+    const projectRoot = join(root, 'project')
+    const sourcePath = join(root, 'photo.png')
+    await mkdir(projectRoot)
+    await createPng(sourcePath)
+    const store = new ImageStore()
+    const stored = await store.importFile(projectRoot, sourcePath)
+    const asset = identity(stored)
+    const eraseKey = 'abc123def456'
+    expect(
+      derivativeRelativePath(asset, { variant: 'erased', usage: { eraseKey } })
+    ).toBe(`assets/cache/1/${asset.contentHash}/erased-${eraseKey}.webp`)
+
+    const webp = await sharp({
+      create: {
+        width: stored.width,
+        height: stored.height,
+        channels: 3,
+        background: { r: 200, g: 40, b: 40 }
+      }
+    })
+      .webp()
+      .toBuffer()
+    const written = await store.writeErased(projectRoot, asset, eraseKey, webp)
+    expect(basename(written)).toBe(`erased-${eraseKey}.webp`)
+    await expect(
+      store.resolve(projectRoot, asset, { variant: 'erased', usage: { eraseKey } })
+    ).resolves.toBe(written)
+
+    // 缺失的消除结果抛错（协议层转 404），不会自动生成
+    await expect(
+      store.resolve(projectRoot, asset, { variant: 'erased', usage: { eraseKey: 'zzzz9999' } })
+    ).rejects.toThrow(/缓存缺失/)
+    await expect(store.writeErased(projectRoot, asset, 'bad/key!', webp)).rejects.toThrow(/键无效/)
+    await expect(store.writeErased(projectRoot, asset, '../escape', webp)).rejects.toThrow(/键无效/)
   })
 
   it('derives safe paths only from hashes, MIME types, pipeline version, and variants', () => {

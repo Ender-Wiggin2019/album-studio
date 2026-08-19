@@ -3,6 +3,7 @@ export type {
   AssetSourceRequest,
   ExportDocumentResult,
   ImportAssetsResult,
+  ImportCandidate,
   RecentStudioProject,
   SaveDocumentResult,
   StudioCapability,

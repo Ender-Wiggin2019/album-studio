@@ -133,6 +133,91 @@ describe('AlbumDocument command interface', () => {
     expect(contentPage(undone).blocks).toEqual([])
   })
 
+  it('keeps every placed photo at its original aspect ratio without a layout', () => {
+    const ids = idFactory()
+    const document = createAlbumDocument({ title: '比例测试', now: NOW }, ids)
+    const withAssets = run(
+      document,
+      {
+        type: 'register-assets',
+        assets: [
+          { ...assets(1)[0], contentHash: 'a'.repeat(64), width: 3_000, height: 4_000 },
+          { ...assets(2)[0], id: 'asset-2', contentHash: 'b'.repeat(64), width: 4_000, height: 2_250 }
+        ]
+      },
+      ids
+    ).document
+    const withPage = run(withAssets, { type: 'add-page' }, ids).document
+    const result = run(
+      withPage,
+      { type: 'place-assets', pageId: contentPage(withPage).id, assetIds: ['asset-1', 'asset-2'] },
+      ids,
+      2
+    ).document
+    const page = contentPage(result)
+
+    expect(page.layoutId).toBeNull()
+    expect(page.blocks.map((block) => block.type)).toEqual(['image', 'image'])
+    for (const block of page.blocks) {
+      if (block.type !== 'image') throw new Error('测试夹具不是图片 Block')
+      const asset = result.assets.find((candidate) => candidate.id === block.assetId)
+      if (!asset) throw new Error('缺少素材记录')
+      const visualRatio =
+        (block.transform.width * result.pageSpec.widthMm) /
+        (block.transform.height * result.pageSpec.heightMm)
+      expect(visualRatio).toBeCloseTo(asset.width / asset.height, 6)
+    }
+    expect(AlbumDocumentSchema.parse(result)).toEqual(result)
+  })
+
+  it('applies the free-form layout keeping photos at original ratios', () => {
+    const { document, ids } = seededDocument(3)
+    const withPage = run(document, { type: 'add-page' }, ids).document
+    const pageId = contentPage(withPage).id
+    const withPhotos = run(
+      withPage,
+      { type: 'place-assets', pageId, assetIds: ['asset-1', 'asset-2', 'asset-3'] },
+      ids
+    ).document
+    const result = run(
+      withPhotos,
+      { type: 'apply-page-layout', pageId, layoutId: 'free-form' },
+      ids,
+      2
+    ).document
+    const page = contentPage(result)
+
+    expect(page.layoutId).toBe('free-form')
+    for (const block of page.blocks) {
+      if (block.type !== 'image') throw new Error('测试夹具不是图片 Block')
+      const asset = result.assets.find((candidate) => candidate.id === block.assetId)
+      if (!asset) throw new Error('缺少素材记录')
+      const visualRatio =
+        (block.transform.width * result.pageSpec.widthMm) /
+        (block.transform.height * result.pageSpec.heightMm)
+      expect(visualRatio).toBeCloseTo(asset.width / asset.height, 6)
+    }
+    expect(AlbumDocumentSchema.parse(result)).toEqual(result)
+  })
+
+  it('gives add-block images without a transform a ratio-preserving default size', () => {
+    const { document, ids } = seededDocument(1)
+    const withPage = run(document, { type: 'add-page' }, ids).document
+    const pageId = contentPage(withPage).id
+    const result = run(
+      withPage,
+      { type: 'add-block', pageId, block: { type: 'image', assetId: 'asset-1' } },
+      ids
+    ).document
+    const block = contentPage(result).blocks[0]
+    if (block.type !== 'image') throw new Error('测试夹具不是图片 Block')
+    const asset = result.assets[0]
+    const ratio = (asset.width / asset.height) * (result.pageSpec.heightMm / result.pageSpec.widthMm)
+
+    expect(block.transform).toMatchObject({ x: 0.1, y: 0.12, width: 0.42, rotationDeg: 0 })
+    expect(block.transform.height).toBeCloseTo(0.42 / ratio, 6)
+  })
+
   it('adds all block types on cover and content pages with command-owned ids', () => {
     const { document, ids } = seededDocument(1)
     const withPage = run(document, { type: 'add-page' }, ids).document
@@ -336,7 +421,10 @@ describe('AlbumDocument command interface', () => {
           sepia: 0.1,
           grayscale: 0,
           blurPx: 0.5,
-          vignette: 0.2
+          vignette: 0.2,
+          beautySmooth: 0.3,
+          beautyWhiten: 0.5,
+          clarity: 0
         },
         mask: { kind: 'rounded' },
         caption: {
@@ -408,6 +496,44 @@ describe('AlbumDocument command interface', () => {
         4
       )
     ).toThrowError(/ImageBlock/)
+  })
+
+  it('reshapes the image block to the applied crop ratio, keeping its center', () => {
+    const { document, ids } = seededDocument(1)
+    const withPage = run(document, { type: 'add-page', assetIds: ['asset-1'] }, ids).document
+    const page = contentPage(withPage)
+    const before = page.blocks[0]
+    if (before.type !== 'image') throw new Error('expected image block')
+    const centerX = before.transform.x + before.transform.width / 2
+    const centerY = before.transform.y + before.transform.height / 2
+    const blockId = before.id
+
+    // 4:3 原图（4000×3000）裁出 1:1 区域：宽 75% × 高 100%
+    const edited = run(
+      withPage,
+      {
+        type: 'update-image-edit',
+        pageId: page.id,
+        blockId,
+        crop: { area: { x: 0, y: 0, width: 75, height: 100 }, rotationDeg: 0, flipX: false, flipY: false }
+      },
+      ids,
+      2
+    ).document
+    const editedBlock = contentPage(edited).blocks[0]
+    if (editedBlock.type !== 'image') throw new Error('expected image block')
+    // 页面为 A4 横向（297×210），Block 视觉宽高比应为 1:1
+    expect(
+      (editedBlock.transform.width * 297) / (editedBlock.transform.height * 210)
+    ).toBeCloseTo(1, 6)
+    expect(editedBlock.transform.x + editedBlock.transform.width / 2).toBeCloseTo(centerX, 9)
+    expect(editedBlock.transform.y + editedBlock.transform.height / 2).toBeCloseTo(centerY, 9)
+    expect(editedBlock.transform.width * editedBlock.transform.height).toBeCloseTo(
+      before.transform.width * before.transform.height,
+      9
+    )
+    expect(editedBlock.transform.x + editedBlock.transform.width).toBeLessThanOrEqual(1 + 1e-9)
+    expect(editedBlock.transform.y + editedBlock.transform.height).toBeLessThanOrEqual(1 + 1e-9)
   })
 
   it('replaces only decoration content and limits color changes to icons', () => {
@@ -736,6 +862,76 @@ describe('AlbumDocument command interface', () => {
     for (const command of decorationCommands) {
       expect(contentPage(run(laidOut, command, ids).document).layoutId).toBe('image-text-focus')
     }
+  })
+
+  it('sets and clears image erase atomically with undo/redo and strict targets', () => {
+    const { document, ids } = seededDocument(1)
+    const withPage = run(document, { type: 'add-page', assetIds: ['asset-1'] }, ids).document
+    const page = contentPage(withPage)
+    const blockId = page.blocks[0].id
+    const erase = {
+      autoDetect: true,
+      strokes: [
+        { mode: 'add' as const, size: 0.04, points: [{ x: 0.5, y: 0.5 }, { x: 0.55, y: 0.6 }] },
+        {
+          mode: 'subtract' as const,
+          size: 0.03,
+          points: [{ x: 0.5, y: 0.5 }, { x: 0.48, y: 0.52 }]
+        }
+      ]
+    }
+
+    const setResult = run(
+      withPage,
+      { type: 'set-image-erase', pageId: page.id, blockId, erase },
+      ids,
+      2
+    )
+    const setDoc = setResult.document
+    expect(setDoc.revision).toBe(withPage.revision + 1)
+    const block = contentPage(setDoc).blocks[0]
+    if (block.type !== 'image') throw new Error('expected image block')
+    expect(block.erase).toEqual(erase)
+
+    const undone = applyAlbumPatches(setDoc, setResult.inversePatches, {
+      now: '2026-08-15T12:03:00.000Z'
+    })
+    const undoneBlock = contentPage(undone).blocks[0]
+    if (undoneBlock.type !== 'image') throw new Error('expected image block')
+    expect(undoneBlock.erase).toBeUndefined()
+
+    const redone = applyAlbumPatches(undone, setResult.patches, {
+      now: '2026-08-15T12:04:00.000Z'
+    })
+    const redoneBlock = contentPage(redone).blocks[0]
+    if (redoneBlock.type !== 'image') throw new Error('expected image block')
+    expect(redoneBlock.erase).toEqual(erase)
+
+    const cleared = run(
+      redone,
+      { type: 'clear-image-erase', pageId: page.id, blockId },
+      ids,
+      5
+    ).document
+    const clearedBlock = contentPage(cleared).blocks[0]
+    if (clearedBlock.type !== 'image') throw new Error('expected image block')
+    expect(clearedBlock.erase).toBeUndefined()
+    expect(AlbumDocumentSchema.parse(cleared)).toEqual(cleared)
+
+    // 严格拒绝非 ImageBlock 目标
+    const cover = cleared.pages[0]
+    const coverTextId = cover.blocks[0].id
+    expect(() =>
+      run(
+        cleared,
+        { type: 'set-image-erase', pageId: cover.id, blockId: coverTextId, erase },
+        ids,
+        6
+      )
+    ).toThrowError(/ImageBlock/)
+    expect(() =>
+      run(cleared, { type: 'clear-image-erase', pageId: cover.id, blockId: coverTextId }, ids, 6)
+    ).toThrowError(/ImageBlock/)
   })
 
   it('strictly rejects retired image-only and fixed-text commands', () => {

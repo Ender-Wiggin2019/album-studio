@@ -10,7 +10,7 @@ export function buildContentSecurityPolicy({ development }: ContentSecurityPolic
     "default-src 'self'",
     `script-src ${scriptSource}`,
     "style-src 'self' 'unsafe-inline'",
-    "img-src 'self' album-asset: data: blob:",
+    "img-src 'self' album-asset: album-candidate: data: blob:",
     "font-src 'self' data:",
     `connect-src ${connectSource}`,
     "object-src 'none'",

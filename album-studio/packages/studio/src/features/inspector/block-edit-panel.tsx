@@ -16,9 +16,11 @@ import {
   RotateCcwIcon,
   RotateCwIcon,
   ShapesIcon,
-  Trash2Icon
+  Trash2Icon,
+  Wand2Icon
 } from 'lucide-react'
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
+import { useStudioPlatform } from '@/app/platform/use-studio-platform'
 import { useStudioStore } from '@/app/store'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -186,6 +188,8 @@ function ImageEditContent({
 }): React.JSX.Element {
   const dispatch = useStudioStore((state) => state.dispatch)
   const setExclusiveWorkspace = useStudioStore((state) => state.setExclusiveWorkspace)
+  const platform = useStudioPlatform()
+  const canErasePeople = platform.capabilities.has('erase-people')
   const updateCaption = (caption: ImageCaption): void =>
     dispatch({ type: 'update-image-edit', pageId, blockId: block.id, caption })
   const rotateBy = (amount: number): void =>
@@ -206,6 +210,16 @@ function ImageEditContent({
           <CropIcon data-icon="inline-start" />
           裁剪与美化
         </Button>
+        {canErasePeople ? (
+          <Button
+            className="mt-2 w-full"
+            variant="outline"
+            onClick={() => setExclusiveWorkspace('erase-people')}
+          >
+            <Wand2Icon data-icon="inline-start" />
+            消除人物
+          </Button>
+        ) : null}
         <div className="mt-2 grid grid-cols-4 gap-1">
           <Button
             variant="outline"

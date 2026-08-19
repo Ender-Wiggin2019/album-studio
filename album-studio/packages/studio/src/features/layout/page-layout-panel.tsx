@@ -1,4 +1,11 @@
-import { listPageLayouts, type PageLayout, type ThemeId } from '@album-studio/common'
+import {
+  FREE_FORM_LAYOUT_DESCRIPTION,
+  FREE_FORM_LAYOUT_ID,
+  FREE_FORM_LAYOUT_NAME,
+  listPageLayouts,
+  type PageLayout,
+  type ThemeId
+} from '@album-studio/common'
 import { ImageIcon, TypeIcon } from 'lucide-react'
 import { useStudioStore } from '@/app/store'
 import { ThemePreviewCard } from '@/features/theme/theme-preview-card'
@@ -65,8 +72,42 @@ export function PageLayoutPanel(): React.JSX.Element {
           <div className="rounded-lg border border-dashed bg-muted/35 px-4 py-5 text-center text-xs leading-5 text-muted-foreground">
             先从素材库或组件库添加图片或文字。
           </div>
-        ) : layouts.length ? (
+        ) : (
           <div className="grid gap-2">
+            {page.kind === 'content' && imageCount > 0 ? (
+              <button
+                key={FREE_FORM_LAYOUT_ID}
+                type="button"
+                aria-pressed={page.layoutId === FREE_FORM_LAYOUT_ID}
+                className="grid grid-cols-[88px_1fr] items-center gap-3 rounded-lg border p-2 text-left outline-none transition-colors hover:border-primary focus-visible:ring-2 focus-visible:ring-ring aria-pressed:border-primary aria-pressed:bg-primary/6"
+                onClick={() =>
+                  dispatch({
+                    type: 'apply-page-layout',
+                    pageId: page.id,
+                    layoutId: FREE_FORM_LAYOUT_ID
+                  })
+                }
+              >
+                <span
+                  className="block w-full"
+                  style={{
+                    aspectRatio: `${document.pageSpec.widthMm} / ${document.pageSpec.heightMm}`
+                  }}
+                >
+                  <span className="relative block size-full overflow-hidden rounded border bg-background">
+                    <span className="absolute inset-x-[8%] top-[10%] bottom-[10%] grid place-items-center rounded-[2px] border border-dashed border-primary/50 bg-primary/8 text-primary">
+                      <ImageIcon className="size-3 max-h-[60%] max-w-[60%]" aria-hidden="true" />
+                    </span>
+                  </span>
+                </span>
+                <span className="min-w-0">
+                  <strong className="block text-xs">{FREE_FORM_LAYOUT_NAME}</strong>
+                  <span className="mt-0.5 block text-[11px] leading-4 text-muted-foreground">
+                    {imageCount} 图 · {FREE_FORM_LAYOUT_DESCRIPTION}
+                  </span>
+                </span>
+              </button>
+            ) : null}
             {layouts.map((layout) => {
               const requiredImages = countSlots(layout, 'image')
               const requiredText = countSlots(layout, 'rich-text')
@@ -99,11 +140,12 @@ export function PageLayoutPanel(): React.JSX.Element {
                 </button>
               )
             })}
+            {layouts.length === 0 && page.kind === 'cover' ? (
+              <p className="rounded-lg border border-dashed px-3 py-4 text-xs text-muted-foreground">
+                封面暂无可应用的页面布局，可直接调整各个 Block。
+              </p>
+            ) : null}
           </div>
-        ) : (
-          <p className="rounded-lg border border-dashed px-3 py-4 text-xs text-muted-foreground">
-            封面暂无可应用的页面布局，可直接调整各个 Block。
-          </p>
         )}
       </section>
 

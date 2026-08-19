@@ -81,7 +81,9 @@ describe('ProjectRepository asset resolution', () => {
     const originalPath = await reopenedRepository.resolveAsset(reopened.document.id, asset.id, {
       variant: 'original'
     })
-    expect(originalPath).toMatch(new RegExp(`/assets/original/${stored.contentHash}\\.png$`))
+    expect(
+      originalPath.endsWith(join('assets', 'original', `${stored.contentHash}.png`))
+    ).toBe(true)
 
     const previewPath = await reopenedRepository.resolveAsset(reopened.document.id, asset.id, {
       variant: 'preview'

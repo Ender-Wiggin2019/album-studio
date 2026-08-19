@@ -1,7 +1,9 @@
 import { createAlbumDocument, type AssetRecord } from '@album-studio/common'
 import { cleanup, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { StudioPlatformProvider } from '@/app/platform/studio-platform-provider'
+import type { StudioPlatform } from '@/app/platform/studio-platform'
 import { useStudioStore } from '@/app/store'
 import { BlockEditPanel } from './block-edit-panel'
 
@@ -18,6 +20,44 @@ const asset: AssetRecord = {
 
 let id = 0
 const nextId = (): string => `id-${++id}`
+
+function renderPanel(): ReturnType<typeof render> {
+  const platform = {
+    kind: 'web',
+    capabilities: new Set<StudioPlatform['capabilities'] extends Set<infer T> ? T : never>(),
+    projects: {
+      listRecent: vi.fn(async () => []),
+      create: vi.fn(async () => null),
+      chooseAndOpen: vi.fn(async () => null),
+      open: vi.fn(async () => {
+        throw new Error('测试不应打开项目')
+      }),
+      save: vi.fn(async () => ({ revision: 0, savedAt: '' }))
+    },
+    assets: {
+      pickCandidates: vi.fn(async () => null),
+      importCandidates: vi.fn(async () => null),
+      releaseCandidates: vi.fn(),
+      relink: vi.fn(async () => null),
+      getSource: vi.fn(async () => ''),
+      releaseSource: vi.fn()
+    },
+    export: { pdf: vi.fn(async () => null) },
+    imageErase: {
+      detect: vi.fn(async () => ({ maskBase64: 'iVBORw0KGgo=', width: 100, height: 100 })),
+      apply: vi.fn(async () => ({ eraseKey: 'abc123', width: 100, height: 100 }))
+    },
+    lifecycle: {
+      onCloseRequest: vi.fn(() => () => undefined),
+      closeReady: vi.fn(async () => undefined)
+    }
+  } satisfies StudioPlatform
+  return render(
+    <StudioPlatformProvider platform={platform}>
+      <BlockEditPanel />
+    </StudioPlatformProvider>
+  )
+}
 
 describe('BlockEditPanel', () => {
   afterEach(cleanup)
@@ -42,9 +82,11 @@ describe('BlockEditPanel', () => {
     if (!page || !block || block.type !== 'image') throw new Error('图片夹具不完整')
     store.selectBlock(page.id, block.id)
 
-    render(<BlockEditPanel />)
+    renderPanel()
     expect(screen.getByRole('button', { name: '裁剪与美化' })).toBeVisible()
     expect(screen.getByRole('button', { name: '复制 Block' })).toBeVisible()
+    // 网页版不声明 erase-people 能力，消除人物入口隐藏
+    expect(screen.queryByRole('button', { name: '消除人物' })).toBeNull()
 
     await user.click(screen.getByRole('button', { name: '水平翻转' }))
     const updated = useStudioStore
@@ -64,7 +106,7 @@ describe('BlockEditPanel', () => {
     if (!page || !block || block.type !== 'image') throw new Error('图片夹具不完整')
     store.selectBlock(page.id, block.id)
 
-    const view = render(<BlockEditPanel />)
+    const view = renderPanel()
     await user.type(screen.getByLabelText('照片说明'), '切换前未失焦的说明')
     view.unmount()
 
@@ -92,7 +134,7 @@ describe('BlockEditPanel', () => {
     if (!block || block.type !== 'decoration') throw new Error('装饰夹具不完整')
     store.selectBlock(page.id, block.id)
 
-    render(<BlockEditPanel />)
+    renderPanel()
     expect(screen.getByLabelText('图标颜色')).toHaveValue('#a84835')
     await user.click(screen.getByRole('button', { name: '打开组件库' }))
     expect(useStudioStore.getState()).toMatchObject({

@@ -6,12 +6,14 @@ import {
 import { BrowserWindow, ipcMain, type IpcMainInvokeEvent } from 'electron'
 import { z } from 'zod'
 import type { AssetService } from '../assets/asset-service'
+import type { EraseService } from '../erase/erase-service'
 import type { PdfExporter } from '../export/pdf-exporter'
 import type { ProjectRepository } from '../projects/project-repository'
 
 type Services = {
   projects: ProjectRepository
   assets: AssetService
+  erase: EraseService
   pdf: PdfExporter
   onCloseReady: (ok: boolean) => void
 }
@@ -50,13 +52,21 @@ export function registerIpc(window: BrowserWindow, services: Services): () => vo
     const request = SaveProjectRequestSchema.parse(input)
     return services.projects.save(request.projectPath, request.document)
   })
-  handle(IPC_CHANNELS.assetsImport, (_event, input: unknown) =>
-    services.assets.chooseAndImport(window, input)
+  handle(IPC_CHANNELS.assetsPickCandidates, (_event, input: unknown) =>
+    services.assets.chooseCandidates(window, input)
+  )
+  handle(IPC_CHANNELS.assetsImportCandidates, (_event, input: unknown) =>
+    services.assets.importCandidates(input)
+  )
+  handle(IPC_CHANNELS.assetsReleaseCandidates, (_event, input: unknown) =>
+    services.assets.releaseCandidates(input)
   )
   handle(IPC_CHANNELS.assetsRelink, (_event, input: unknown) =>
     services.assets.chooseAndRelink(window, input)
   )
   handle(IPC_CHANNELS.exportPdf, (_event, input: unknown) => services.pdf.export(window, input))
+  handle(IPC_CHANNELS.imageEraseDetect, (_event, input: unknown) => services.erase.detect(input))
+  handle(IPC_CHANNELS.imageEraseApply, (_event, input: unknown) => services.erase.apply(input))
   handle(IPC_CHANNELS.appCloseReady, (_event, input: unknown) => {
     const result = z.object({ ok: z.boolean(), error: z.string().optional() }).parse(input)
     services.onCloseReady(result.ok)

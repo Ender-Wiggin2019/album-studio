@@ -1,14 +1,18 @@
 import { applyPatches, enablePatches, produceWithPatches, type Draft, type Patch } from 'immer'
 import { z } from 'zod'
 import {
+  arrangeImageBlocksFree,
   createContentPage,
   createDecorationBlock,
   createImageBlock,
   createRichTextBlock,
+  DEFAULT_IMAGE_BLOCK_TRANSFORM,
+  fitImageBlockSize,
   type IdFactory
 } from './create'
 import { applyImageEffectPreset, ImageEffectPresetIdSchema } from './effects'
-import { getPageLayout } from './layouts'
+import { fitBlockTransformToCrop } from './crop'
+import { FREE_FORM_LAYOUT_ID, getPageLayout } from './layouts'
 import {
   AlbumDocumentSchema,
   AssetRecordSchema,
@@ -19,6 +23,7 @@ import {
   ImageCaptionSchema,
   ImageCropSchema,
   ImageEffectsSchema,
+  ImageEraseSchema,
   ImageMaskSchema,
   PageLayoutIdSchema,
   RichTextDocumentSchema,
@@ -27,7 +32,9 @@ import {
   type AlbumPage,
   type Block,
   type BlockTransform,
-  type PageLayoutId
+  type ImageBlock,
+  type PageLayoutId,
+  transformsEqual
 } from './schema'
 
 enablePatches()
@@ -166,6 +173,23 @@ const ApplyEffectPresetCommandSchema = z
   })
   .strict()
 
+const SetImageEraseCommandSchema = z
+  .object({
+    type: z.literal('set-image-erase'),
+    pageId: id,
+    blockId: id,
+    erase: ImageEraseSchema
+  })
+  .strict()
+
+const ClearImageEraseCommandSchema = z
+  .object({
+    type: z.literal('clear-image-erase'),
+    pageId: id,
+    blockId: id
+  })
+  .strict()
+
 const ReplaceDecorationCommandSchema = z
   .object({
     type: z.literal('replace-decoration'),
@@ -217,6 +241,8 @@ export const AlbumCommandSchema = z.discriminatedUnion('type', [
   UpdateRichTextCommandSchema,
   UpdateImageEditCommandSchema,
   ApplyEffectPresetCommandSchema,
+  SetImageEraseCommandSchema,
+  ClearImageEraseCommandSchema,
   ReplaceDecorationCommandSchema,
   SetIconColorCommandSchema,
   ApplyPageLayoutCommandSchema,
@@ -287,15 +313,6 @@ function findBlock(
   return { page, block: page.blocks[index], index }
 }
 
-function cascadedTransform(transform: BlockTransform, index: number): BlockTransform {
-  const offset = (index % 8) * 0.025
-  return {
-    ...transform,
-    x: Math.min(transform.x + offset, 1 - transform.width),
-    y: Math.min(transform.y + offset, 1 - transform.height)
-  }
-}
-
 function duplicateTransform(transform: BlockTransform): BlockTransform {
   return {
     ...transform,
@@ -315,13 +332,21 @@ function addImageBlocks(
   }
   for (const assetId of assetIds) requireAsset(document, assetId)
 
-  let imageCount = page.blocks.filter((block) => block.type === 'image').length
-  for (const assetId of assetIds) {
+  const photos = assetIds.map((assetId) => {
+    const asset = document.assets.find((candidate) => candidate.id === assetId)
+    if (!asset) commandError('ASSET_MISSING', `素材不存在：${assetId}`)
+    return { width: asset.width, height: asset.height }
+  })
+  const transforms = arrangeImageBlocksFree({
+    photos,
+    pageWidthMm: document.pageSpec.widthMm,
+    pageHeightMm: document.pageSpec.heightMm
+  })
+  assetIds.forEach((assetId, index) => {
     const block = createImageBlock(assetId, undefined, idFactory)
-    block.transform = cascadedTransform(block.transform, imageCount)
+    block.transform = { ...transforms[index] }
     page.blocks.push(block)
-    imageCount += 1
-  }
+  })
   page.layoutId = null
 }
 
@@ -343,12 +368,57 @@ function addBlock(
   idFactory: IdFactory
 ): void {
   if (page.blocks.length >= 100) commandError('PAGE_LIMIT', '每页最多放置 100 个 Block')
-  if (input.type === 'image') requireAsset(document, input.assetId)
-  page.blocks.push(createBlock(input, idFactory))
-  if (input.type !== 'decoration') page.layoutId = null
+  let resolved: AddBlockInput = input
+  if (input.type === 'image') {
+    requireAsset(document, input.assetId)
+    if (!input.transform) {
+      const asset = document.assets.find((candidate) => candidate.id === input.assetId)
+      if (!asset) commandError('ASSET_MISSING', `素材不存在：${input.assetId}`)
+      const size = fitImageBlockSize({
+        assetWidth: asset.width,
+        assetHeight: asset.height,
+        pageWidthMm: document.pageSpec.widthMm,
+        pageHeightMm: document.pageSpec.heightMm
+      })
+      resolved = {
+        ...input,
+        transform: {
+          ...DEFAULT_IMAGE_BLOCK_TRANSFORM,
+          width: size.width,
+          height: size.height
+        }
+      }
+    }
+  }
+  page.blocks.push(createBlock(resolved, idFactory))
+  if (resolved.type !== 'decoration') page.layoutId = null
 }
 
-function applyPageLayout(page: PageDraft, layoutId: PageLayoutId): void {
+function applyPageLayout(
+  document: DocumentDraft,
+  page: PageDraft,
+  layoutId: PageLayoutId
+): void {
+  if (layoutId === FREE_FORM_LAYOUT_ID) {
+    const imageBlocks = page.blocks.filter(
+      (block): block is Draft<ImageBlock> => block.type === 'image'
+    )
+    const photos = imageBlocks.map((block) => {
+      const asset = document.assets.find((candidate) => candidate.id === block.assetId)
+      if (!asset) commandError('ASSET_MISSING', `素材不存在：${block.assetId}`)
+      return { width: asset.width, height: asset.height }
+    })
+    const transforms = arrangeImageBlocksFree({
+      photos,
+      pageWidthMm: document.pageSpec.widthMm,
+      pageHeightMm: document.pageSpec.heightMm
+    })
+    imageBlocks.forEach((block, index) => {
+      block.transform = { ...transforms[index] }
+    })
+    page.layoutId = FREE_FORM_LAYOUT_ID
+    return
+  }
   const layout = getPageLayout(layoutId)
   if (!layout.supportedPageKinds.includes(page.kind)) {
     commandError(
@@ -395,7 +465,7 @@ function applyCommand(document: DocumentDraft, command: AlbumCommand, idFactory:
     case 'add-page': {
       const page = createContentPage(idFactory)
       addImageBlocks(document, page, command.assetIds ?? [], idFactory)
-      if (command.layoutId) applyPageLayout(page, command.layoutId)
+      if (command.layoutId) applyPageLayout(document, page, command.layoutId)
       const afterIndex = command.afterPageId
         ? document.pages.findIndex((candidate) => candidate.id === command.afterPageId)
         : document.pages.length - 1
@@ -424,7 +494,7 @@ function applyCommand(document: DocumentDraft, command: AlbumCommand, idFactory:
     case 'place-assets': {
       const page = requirePage(document, command.pageId)
       addImageBlocks(document, page, command.assetIds, idFactory)
-      if (command.layoutId) applyPageLayout(page, command.layoutId)
+      if (command.layoutId) applyPageLayout(document, page, command.layoutId)
       return
     }
     case 'add-block': {
@@ -479,9 +549,27 @@ function applyCommand(document: DocumentDraft, command: AlbumCommand, idFactory:
       return
     }
     case 'update-image-edit': {
-      const { block } = findBlock(document, command.pageId, command.blockId)
+      const { page, block } = findBlock(document, command.pageId, command.blockId)
       if (block.type !== 'image') commandError('INVALID_TARGET', '此命令只能用于 ImageBlock')
-      if (command.crop) block.crop = command.crop
+      if (command.crop) {
+        block.crop = command.crop
+        const asset = document.assets.find((candidate) => candidate.id === block.assetId)
+        if (asset) {
+          const nextTransform = fitBlockTransformToCrop({
+            transform: block.transform,
+            pageWidthMm: document.pageSpec.widthMm,
+            pageHeightMm: document.pageSpec.heightMm,
+            assetWidth: asset.width,
+            assetHeight: asset.height,
+            rotationDeg: command.crop.rotationDeg,
+            area: command.crop.area
+          })
+          if (!transformsEqual(block.transform, nextTransform)) {
+            block.transform = nextTransform
+            page.layoutId = null
+          }
+        }
+      }
       if (command.effects) block.effects = command.effects
       if (command.mask) block.mask = command.mask
       if (command.caption) block.caption = command.caption
@@ -491,6 +579,18 @@ function applyCommand(document: DocumentDraft, command: AlbumCommand, idFactory:
       const { block } = findBlock(document, command.pageId, command.blockId)
       if (block.type !== 'image') commandError('INVALID_TARGET', '此命令只能用于 ImageBlock')
       block.effects = applyImageEffectPreset(command.presetId)
+      return
+    }
+    case 'set-image-erase': {
+      const { block } = findBlock(document, command.pageId, command.blockId)
+      if (block.type !== 'image') commandError('INVALID_TARGET', '此命令只能用于 ImageBlock')
+      block.erase = command.erase
+      return
+    }
+    case 'clear-image-erase': {
+      const { block } = findBlock(document, command.pageId, command.blockId)
+      if (block.type !== 'image') commandError('INVALID_TARGET', '此命令只能用于 ImageBlock')
+      delete block.erase
       return
     }
     case 'replace-decoration': {
@@ -510,7 +610,11 @@ function applyCommand(document: DocumentDraft, command: AlbumCommand, idFactory:
       return
     }
     case 'apply-page-layout': {
-      applyPageLayout(requirePage(document, command.pageId), command.layoutId)
+      applyPageLayout(
+        document,
+        requirePage(document, command.pageId),
+        command.layoutId
+      )
       return
     }
     case 'set-theme':

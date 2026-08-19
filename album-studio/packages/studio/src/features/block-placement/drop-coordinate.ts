@@ -3,9 +3,11 @@ import {
   DEFAULT_IMAGE_BLOCK_TRANSFORM,
   DEFAULT_RICH_TEXT_BLOCK_TRANSFORM,
   createRichTextDocument,
+  fitImageBlockSize,
   type AlbumCommand,
   type BlockTransform,
-  type Decoration
+  type Decoration,
+  type PageSpec
 } from '@album-studio/common'
 import {
   isAlbumPageDropPayload,
@@ -20,6 +22,12 @@ export type PageDropRect = Readonly<{
   width: number
   height: number
 }>
+export type AssetPixelSize = Readonly<{ width: number; height: number }>
+export type PlacementOptions = Readonly<{
+  point?: PlacementPoint
+  assetSize?: AssetPixelSize
+  pageSpec?: PageSpec
+}>
 
 export const DEFAULT_ICON_COLOR = '#a84835' as const
 export const DEFAULT_RICH_TEXT_CONTENT = '在这里写下故事' as const
@@ -33,15 +41,21 @@ function clamp(value: number, minimum: number, maximum: number): number {
   return Math.min(maximum, Math.max(minimum, value))
 }
 
-function defaultTransform(payload: BlockPlacementPayload): Readonly<BlockTransform> {
+function defaultSize(payload: BlockPlacementPayload): Readonly<{ width: number; height: number }> {
   switch (payload.kind) {
     case 'asset':
-      return DEFAULT_IMAGE_BLOCK_TRANSFORM
+      return { width: DEFAULT_IMAGE_BLOCK_TRANSFORM.width, height: DEFAULT_IMAGE_BLOCK_TRANSFORM.height }
     case 'rich-text':
-      return DEFAULT_RICH_TEXT_BLOCK_TRANSFORM
+      return {
+        width: DEFAULT_RICH_TEXT_BLOCK_TRANSFORM.width,
+        height: DEFAULT_RICH_TEXT_BLOCK_TRANSFORM.height
+      }
     case 'icon':
     case 'sticker':
-      return DEFAULT_DECORATION_BLOCK_TRANSFORM
+      return {
+        width: DEFAULT_DECORATION_BLOCK_TRANSFORM.width,
+        height: DEFAULT_DECORATION_BLOCK_TRANSFORM.height
+      }
   }
 }
 
@@ -60,16 +74,25 @@ export function clientPointToNormalizedPagePoint(
 
 export function transformCenteredAt(
   payload: BlockPlacementPayload,
-  point: PlacementPoint
+  point: PlacementPoint,
+  options: PlacementOptions = {}
 ): BlockTransform {
-  const defaults = defaultTransform(payload)
+  const size =
+    payload.kind === 'asset' && options.assetSize && options.pageSpec
+      ? fitImageBlockSize({
+          assetWidth: options.assetSize.width,
+          assetHeight: options.assetSize.height,
+          pageWidthMm: options.pageSpec.widthMm,
+          pageHeightMm: options.pageSpec.heightMm
+        })
+      : defaultSize(payload)
   const centerX = finite(point.x, '页面横坐标')
   const centerY = finite(point.y, '页面纵坐标')
   return {
-    x: clamp(centerX - defaults.width / 2, 0, 1 - defaults.width),
-    y: clamp(centerY - defaults.height / 2, 0, 1 - defaults.height),
-    width: defaults.width,
-    height: defaults.height,
+    x: clamp(centerX - size.width / 2, 0, 1 - size.width),
+    y: clamp(centerY - size.height / 2, 0, 1 - size.height),
+    width: size.width,
+    height: size.height,
     rotationDeg: 0
   }
 }
@@ -86,9 +109,9 @@ export function decorationFromPlacementPayload(
 export function buildAddBlockCommand(
   pageId: string,
   payload: BlockPlacementPayload,
-  point: PlacementPoint = { x: 0.5, y: 0.5 }
+  options: PlacementOptions = {}
 ): AlbumCommand {
-  const transform = transformCenteredAt(payload, point)
+  const transform = transformCenteredAt(payload, options.point ?? { x: 0.5, y: 0.5 }, options)
   switch (payload.kind) {
     case 'asset':
       return {
@@ -126,6 +149,8 @@ export function buildDroppedBlockCommand(input: {
   targetData: unknown
   targetRect: PageDropRect | null
   clientPoint: PlacementPoint
+  assetSize?: AssetPixelSize
+  pageSpec?: PageSpec
 }): AlbumCommand | null {
   if (
     input.canceled ||
@@ -136,5 +161,9 @@ export function buildDroppedBlockCommand(input: {
     return null
   }
   const point = clientPointToNormalizedPagePoint(input.clientPoint, input.targetRect)
-  return buildAddBlockCommand(input.targetData.pageId, input.sourceData, point)
+  return buildAddBlockCommand(input.targetData.pageId, input.sourceData, {
+    point,
+    assetSize: input.assetSize,
+    pageSpec: input.pageSpec
+  })
 }

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { DEFAULT_PAGE_SPEC } from '@album-studio/common'
 import {
   buildAddBlockCommand,
   buildDroppedBlockCommand,
@@ -13,6 +14,11 @@ const PAYLOADS = {
   icon: { kind: 'icon', resourceId: 'heart' },
   sticker: { kind: 'sticker', resourceId: 'travel-tag' }
 } as const satisfies Record<string, BlockPlacementPayload>
+
+const ASSET_OPTIONS = {
+  assetSize: { width: 1_600, height: 1_200 },
+  pageSpec: DEFAULT_PAGE_SPEC
+} as const
 
 describe('block placement coordinates', () => {
   it.each([
@@ -36,10 +42,11 @@ describe('block placement coordinates', () => {
   )
 
   it('centers each Block type at the point and clamps it inside the page', () => {
-    const centeredAsset = transformCenteredAt(PAYLOADS.asset, { x: 0.5, y: 0.5 })
+    const centeredAsset = transformCenteredAt(PAYLOADS.asset, { x: 0.5, y: 0.5 }, ASSET_OPTIONS)
     expect(centeredAsset.x).toBeCloseTo(0.29)
-    expect(centeredAsset.y).toBeCloseTo(0.225)
-    expect(centeredAsset).toMatchObject({ width: 0.42, height: 0.55, rotationDeg: 0 })
+    expect(centeredAsset.y).toBeCloseTo(0.27725)
+    expect(centeredAsset).toMatchObject({ width: 0.42, rotationDeg: 0 })
+    expect(centeredAsset.height).toBeCloseTo(0.4455, 4)
     expect(transformCenteredAt(PAYLOADS.text, { x: 0, y: 0 })).toEqual({
       x: 0,
       y: 0,
@@ -56,8 +63,30 @@ describe('block placement coordinates', () => {
     })
   })
 
+  it('sizes asset placement to the photo original aspect ratio', () => {
+    const portrait = transformCenteredAt(
+      PAYLOADS.asset,
+      { x: 0.5, y: 0.5 },
+      { assetSize: { width: 3_000, height: 4_000 }, pageSpec: DEFAULT_PAGE_SPEC }
+    )
+    const landscape = transformCenteredAt(
+      PAYLOADS.asset,
+      { x: 0.5, y: 0.5 },
+      { assetSize: { width: 4_000, height: 2_250 }, pageSpec: DEFAULT_PAGE_SPEC }
+    )
+    for (const [transform, photoRatio] of [
+      [portrait, 3_000 / 4_000],
+      [landscape, 4_000 / 2_250]
+    ] as const) {
+      const visualRatio =
+        (transform.width * DEFAULT_PAGE_SPEC.widthMm) /
+        (transform.height * DEFAULT_PAGE_SPEC.heightMm)
+      expect(visualRatio).toBeCloseTo(photoRatio, 6)
+    }
+  })
+
   it('builds all click and drag additions through the same add-block command seam', () => {
-    expect(buildAddBlockCommand('page-1', PAYLOADS.asset)).toMatchObject({
+    expect(buildAddBlockCommand('page-1', PAYLOADS.asset, ASSET_OPTIONS)).toMatchObject({
       type: 'add-block',
       pageId: 'page-1',
       block: { type: 'image', assetId: 'asset-1' }
@@ -85,7 +114,9 @@ describe('block placement coordinates', () => {
       sourceData: PAYLOADS.asset,
       targetData: { kind: 'album-page', pageId: 'page-1' },
       targetRect: { left: 100, top: 50, width: 800, height: 450 },
-      clientPoint: { x: 500, y: 275 }
+      clientPoint: { x: 500, y: 275 },
+      assetSize: ASSET_OPTIONS.assetSize,
+      pageSpec: ASSET_OPTIONS.pageSpec
     } as const
 
     expect(buildDroppedBlockCommand({ ...valid, canceled: true })).toBeNull()
@@ -106,6 +137,6 @@ describe('block placement coordinates', () => {
     if (!command || command.type !== 'add-block') throw new Error('未生成 add-block 命令')
     if (!command.block.transform) throw new Error('add-block 命令未生成 transform')
     expect(command.block.transform.x).toBeCloseTo(0.29)
-    expect(command.block.transform.y).toBeCloseTo(0.225)
+    expect(command.block.transform.y).toBeCloseTo(0.27725)
   })
 })

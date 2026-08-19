@@ -20,6 +20,7 @@ import { AlbumPageView } from './album-page-view'
 
 const PAGE_SPEC_NAMES = {
   'a4-landscape': 'A4 横向',
+  'a4-portrait': 'A4 竖排',
   'square-12': '12 寸方形',
   'widescreen-16-9': '16:9 宽屏'
 } as const
@@ -51,8 +52,9 @@ export function EditorWorkspace(): React.JSX.Element {
   const dispatch = useStudioStore((state) => state.dispatch)
   const markAssetMissing = useStudioStore((state) => state.markAssetMissing)
   const sheetRef = useRef<HTMLDivElement>(null)
+  const scrollRef = useRef<HTMLDivElement>(null)
   const gestureRef = useRef<BlockTransform | null>(null)
-  const [zoom, setZoom] = useState(0.9)
+  const [zoom, setZoom] = useState(0.75)
   const page =
     document?.pages.find((candidate) => candidate.id === selectedPageId) ?? document?.pages[0]
   const { ref: dropTargetRef, isDropTarget } = useAlbumPageDropTarget(page?.id ?? 'inactive-page')
@@ -81,6 +83,22 @@ export function EditorWorkspace(): React.JSX.Element {
     return bounds && bounds.width > 0 && bounds.height > 0
       ? { width: bounds.width, height: bounds.height }
       : null
+  }
+
+  const fitToWindow = (): void => {
+    const sheet = sheetRef.current
+    const scroll = scrollRef.current
+    if (!sheet || !scroll) return
+    const sheetBounds = sheet.getBoundingClientRect()
+    if (sheetBounds.width <= 0 || sheetBounds.height <= 0) return
+    const style = getComputedStyle(scroll)
+    const padX = parseFloat(style.paddingLeft) + parseFloat(style.paddingRight)
+    const padY = parseFloat(style.paddingTop) + parseFloat(style.paddingBottom)
+    const fit = Math.min(
+      (scroll.clientWidth - padX) / sheetBounds.width,
+      (scroll.clientHeight - padY) / sheetBounds.height
+    )
+    setZoom(Math.min(1.5, Math.max(0.42, fit)))
   }
 
   const previewTransform = (target: HTMLElement | SVGElement, next: BlockTransform): void => {
@@ -124,7 +142,7 @@ export function EditorWorkspace(): React.JSX.Element {
             </Button>
             <button
               type="button"
-              onClick={() => setZoom(0.9)}
+              onClick={fitToWindow}
               className="min-w-14 rounded px-2 py-1 font-mono text-xs text-muted-foreground hover:bg-accent"
             >
               {Math.round(zoom * 100)}%
@@ -140,7 +158,7 @@ export function EditorWorkspace(): React.JSX.Element {
             <Button
               variant="ghost"
               size="icon-sm"
-              onClick={() => setZoom(0.9)}
+              onClick={fitToWindow}
               aria-label="适合窗口"
             >
               <Maximize2Icon />
@@ -172,6 +190,7 @@ export function EditorWorkspace(): React.JSX.Element {
           </div>
         </div>
         <div
+          ref={scrollRef}
           className="canvas-scroll"
           onPointerDown={(event) => {
             if (event.target === event.currentTarget) clearBlockSelection()

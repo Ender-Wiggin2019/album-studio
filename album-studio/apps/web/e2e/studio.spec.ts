@@ -78,6 +78,9 @@ test('浏览器离线版可导入、自由拖动、美化、自动保存、刷�
     mimeType: 'image/png',
     buffer: Buffer.from('not-a-png')
   })
+  await expect(page.getByRole('heading', { name: '选择要导入的照片' })).toBeVisible()
+  await page.getByRole('checkbox', { name: '选择 无法解码的超长中文照片文件名.png' }).click()
+  await page.getByRole('button', { name: /导入所选/ }).click()
   const skippedSummary = page.getByText('1 个文件未导入 · 查看详情')
   await expect(skippedSummary).toBeVisible()
   await skippedSummary.click()
@@ -95,6 +98,9 @@ test('浏览器离线版可导入、自由拖动、美化、自动保存、刷�
     mimeType: 'image/png',
     buffer: TEST_PNG
   })
+  await expect(page.getByRole('heading', { name: '选择要导入的照片' })).toBeVisible()
+  await page.getByRole('checkbox', { name: '选择 浏览器测试照片.png' }).click()
+  await page.getByRole('button', { name: /导入所选/ }).click()
   const importedAssetSource = page.getByRole('button', {
     name: /添加 浏览器测试照片\.png 到当前页/
   })
@@ -366,7 +372,7 @@ test('浏览器离线版可导入、自由拖动、美化、自动保存、刷�
   if (!narrowFirstResizeFrame) throw new Error('无法测量窄窗口缩放首帧')
   expect(narrowFirstResizeFrame.width).toBeGreaterThan(narrowResizeBox.width * 0.9)
   expect(narrowFirstResizeFrame.height).toBeGreaterThan(narrowResizeBox.height * 0.9)
-  await page.mouse.move(narrowResizeStart.x - 24, narrowResizeStart.y - 8, { steps: 6 })
+  await page.mouse.move(narrowResizeStart.x - 36, narrowResizeStart.y - 12, { steps: 6 })
   await page.mouse.up()
   const narrowAfterResizeBox = await image.boundingBox()
   expect(narrowAfterResizeBox).not.toBeNull()
@@ -439,9 +445,16 @@ test('浏览器离线版可导入、自由拖动、美化、自动保存、刷�
   })
   await page.mouse.up()
 
+  // 网页版不声明 erase-people 能力：消除人物入口隐藏（当前图片已选中）
+  await expect(page.getByRole('button', { name: '消除人物' })).toHaveCount(0)
   await page.getByRole('button', { name: '裁剪与美化' }).click()
   await expect(page.getByRole('region', { name: '照片编辑' })).toBeVisible()
   await page.getByRole('button', { name: '暖阳', exact: true }).click()
+  // 自动美化：只修正亮度/对比度/饱和度，保留暖阳的复古与暗角
+  await expect(page.getByRole('button', { name: '自动美化' })).toBeEnabled()
+  await page.getByRole('button', { name: '自动美化' }).click()
+  // 单色测试图分位跨度 0 → 对比度补足到 1.3（暖阳预设对比度为 1.03，被自动修正覆盖）
+  await expect(page.getByText('1.30×', { exact: true }).first()).toBeVisible()
   await page.getByRole('button', { name: '水平翻转', exact: true }).click()
   await page.getByRole('button', { name: '应用到照片' }).click()
   await expect(page.getByText('已保存', { exact: true })).toBeVisible()
@@ -459,11 +472,12 @@ test('浏览器离线版可导入、自由拖动、美化、自动保存、刷�
         ? {
             x: block.transform.x,
             flipX: block.crop.flipX,
-            sepia: block.effects.sepia
+            sepia: block.effects.sepia,
+            contrast: block.effects.contrast
           }
         : null
     })
-    .toMatchObject({ flipX: true, sepia: 0.14 })
+    .toMatchObject({ flipX: true, sepia: 0.14, contrast: 1.3 })
 
   const saved = await readOnlyManifest(page)
   const savedImageBlock = firstContentImageBlock(saved)
@@ -479,8 +493,7 @@ test('浏览器离线版可导入、自由拖动、美化、自动保存、刷�
   await page.screenshot({ path: testInfo.outputPath('browser-workspace-1440x900.png') })
 
   await page.reload()
-  await expect(page.getByRole('button', { name: new RegExp(LONG_PROJECT_TITLE) })).toBeVisible()
-  await page.getByRole('button', { name: new RegExp(LONG_PROJECT_TITLE) }).click()
+  // 刷新后自动继续打开最近编辑的相册，直接回到工作区
   await expect(page.getByText('第 1 页 · 4 个 Block', { exact: true })).toBeVisible()
   await page.getByText('第 1 页 · 4 个 Block', { exact: true }).click()
   await expect(
@@ -507,7 +520,7 @@ test('浏览器离线版可导入、自由拖动、美化、自动保存、刷�
     await project.removeEntry('cache', { recursive: true })
   }, saved.id)
   await page.reload()
-  await page.getByRole('button', { name: new RegExp(LONG_PROJECT_TITLE) }).click()
+  // 刷新后自动继续打开该相册，缺失素材直接呈现
   await expect(page.getByText('图片文件不可用').first()).toBeVisible()
   await page.getByRole('tab', { name: /素材/ }).click()
   await expect(page.getByText('图片数据不可用')).toBeVisible()

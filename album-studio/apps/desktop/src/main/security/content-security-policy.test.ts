@@ -18,5 +18,6 @@ describe('buildContentSecurityPolicy', () => {
     expect(policy).not.toContain(' ws:')
     expect(policy).not.toContain(' http:')
     expect(policy).not.toContain(' https:')
+    expect(policy).toContain("img-src 'self' album-asset: album-candidate: data: blob:")
   })
 })

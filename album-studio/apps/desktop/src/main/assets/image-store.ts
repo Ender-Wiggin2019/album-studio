@@ -1,8 +1,13 @@
 import { IMAGE_PIPELINE_VERSION, pageSpecSizeAtDpi, type PageSpec } from '@album-studio/common'
 import { createHash, randomUUID } from 'node:crypto'
-import { lstat, mkdir, open, realpath, rename, unlink } from 'node:fs/promises'
+import { lstat, mkdir, open, realpath, rename, unlink, writeFile } from 'node:fs/promises'
 import { dirname, join, posix, resolve, sep } from 'node:path'
 import sharp from 'sharp'
+
+// Windows 上 libvips 会缓存已打开文件的句柄：inspectImage 读取临时文件后，
+// publishTemporaryFile 立即 rename/unlink 该临时文件会报 EBUSY（句柄被缓存保持）。
+// 全局禁用文件句柄缓存，让每次读取后句柄立即释放（与测试环境一致，见 image-store.test.ts）。
+sharp.cache({ files: 0 })
 
 export const MAX_INPUT_PIXELS = 80_000_000
 
@@ -28,6 +33,7 @@ export type ImageVariantRequest =
       pageSpec: PageSpec
       usage?: { widthFraction: number; heightFraction: number }
     }
+  | { variant: 'erased'; usage: { eraseKey: string } }
 
 export type StoredImage = {
   contentHash: string
@@ -66,6 +72,10 @@ function assertContentHash(contentHash: string): void {
 
 function assertMimeType(mimeType: string): asserts mimeType is SupportedImageMimeType {
   if (!(mimeType in EXTENSION_BY_MIME)) throw new Error('素材图片格式无效。')
+}
+
+function assertEraseKey(eraseKey: string): void {
+  if (!/^[0-9a-z]{4,64}$/.test(eraseKey)) throw new Error('消除结果键无效。')
 }
 
 function toFileSystemPath(root: string, relativePath: string): string {
@@ -122,6 +132,9 @@ function derivativeDescriptor(request: Exclude<ImageVariantRequest, { variant: '
   name: string
   target: { width: number; height: number }
 } {
+  if (request.variant === 'erased') {
+    return { name: `erased-${request.usage.eraseKey}`, target: { width: 0, height: 0 } }
+  }
   const target =
     request.variant === 'thumbnail'
       ? THUMBNAIL_TARGET
@@ -294,6 +307,9 @@ function derivativeSize(
   asset: Pick<StoredImageIdentity, 'width' | 'height'>,
   request: Exclude<ImageVariantRequest, { variant: 'original' }>
 ): { width: number; height: number } {
+  if (request.variant === 'erased') {
+    return { width: Math.max(1, asset.width), height: Math.max(1, asset.height) }
+  }
   const descriptor = derivativeDescriptor(request)
   const width = Math.max(1, asset.width)
   const height = Math.max(1, asset.height)
@@ -406,6 +422,17 @@ export class ImageStore {
 
     const relativePath = derivativeRelativePath(asset, request)
     const finalPath = toFileSystemPath(canonicalRoot, relativePath)
+
+    // 消除结果由推理服务生成，这里只做只读查找；缺失时抛错（协议层转 404）。
+    if (request.variant === 'erased') {
+      if (await existingRegularFile(finalPath)) {
+        const cached = await realpath(finalPath)
+        if (!isPathInside(canonicalRoot, cached)) throw new Error('素材缓存越过项目边界。')
+        return cached
+      }
+      throw new Error('消除结果缓存缺失，请重新应用消除。')
+    }
+
     const existing = this.inFlight.get(finalPath)
     if (existing) return existing
 
@@ -442,7 +469,7 @@ export class ImageStore {
             smartSubsample: true
           })
           .toFile(temporaryPath)
-        const temporary = await open(temporaryPath, 'r')
+        const temporary = await open(temporaryPath, 'r+')
         try {
           await temporary.sync()
         } finally {
@@ -463,6 +490,52 @@ export class ImageStore {
     } finally {
       if (this.inFlight.get(finalPath) === operation) this.inFlight.delete(finalPath)
     }
+  }
+
+  /**
+   * 写入消除结果派生图（由推理服务生成，与原图同像素尺寸）。
+   * 走与其它派生图相同的安全目录、原子发布与 fsync 语义。
+   */
+  async writeErased(
+    projectRoot: string,
+    asset: StoredImageIdentity,
+    eraseKey: string,
+    image: Buffer
+  ): Promise<string> {
+    assertEraseKey(eraseKey)
+    const canonicalRoot = await realpath(projectRoot)
+    const relativePath = derivativeRelativePath(asset, {
+      variant: 'erased',
+      usage: { eraseKey }
+    })
+    const finalPath = toFileSystemPath(canonicalRoot, relativePath)
+    if (!isPathInside(canonicalRoot, finalPath)) throw new Error('素材路径越过项目边界。')
+    const cacheDirectory = await ensureSafeDirectory(canonicalRoot, [
+      'assets',
+      'cache',
+      IMAGE_PIPELINE_VERSION,
+      asset.contentHash
+    ])
+    const temporaryPath = join(
+      cacheDirectory,
+      `.erased-${eraseKey}.${process.pid}.${randomUUID()}.tmp`
+    )
+    try {
+      await writeFile(temporaryPath, image)
+      const temporary = await open(temporaryPath, 'r+')
+      try {
+        await temporary.sync()
+      } finally {
+        await temporary.close()
+      }
+      await publishTemporaryFile(temporaryPath, finalPath)
+    } catch (error) {
+      await unlink(temporaryPath).catch(() => undefined)
+      throw error
+    }
+    const cached = await realpath(finalPath)
+    if (!isPathInside(canonicalRoot, cached)) throw new Error('素材缓存越过项目边界。')
+    return cached
   }
 }
 

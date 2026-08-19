@@ -35,6 +35,7 @@ import { ThemePreviewCard } from '@/features/theme/theme-preview-card'
 
 const pageSpecLabels: Record<PageSpec['presetId'], { name: string; size: string }> = {
   'a4-landscape': { name: 'A4 横向', size: '297 × 210 mm' },
+  'a4-portrait': { name: 'A4 竖排', size: '210 × 297 mm' },
   'square-12': { name: '12 寸方形', size: '304.8 × 304.8 mm' },
   'widescreen-16-9': { name: '16:9 宽屏', size: '338.67 × 190.5 mm' }
 }

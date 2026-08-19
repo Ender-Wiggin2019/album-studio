@@ -4,7 +4,7 @@ import {
   type AlbumDocument,
   type AssetRecord
 } from '@album-studio/common'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { StudioPlatform } from '@/app/platform/studio-platform'
 import { StudioPlatformProvider } from '@/app/platform/studio-platform-provider'
@@ -46,7 +46,9 @@ const platform = {
   kind: 'web',
   capabilities: new Set(['folder-import', 'asset-relink']),
   assets: {
-    import: vi.fn(),
+    pickCandidates: vi.fn(),
+    importCandidates: vi.fn(),
+    releaseCandidates: vi.fn(),
     relink: vi.fn(),
     getSource: vi.fn().mockResolvedValue('data:image/gif;base64,R0lGODlhAQABAAAAACw='),
     releaseSource: vi.fn()
@@ -82,7 +84,7 @@ describe('ProjectAssetsPanel', () => {
     vi.clearAllMocks()
   })
 
-  it('单击在当前封面中央添加普通 ImageBlock，复选框只改批量选择', () => {
+  it('单击在当前封面中央按原图比例添加 ImageBlock，复选框只改批量选择', () => {
     openDocument(1)
     renderPanel()
 
@@ -91,13 +93,21 @@ describe('ProjectAssetsPanel', () => {
     let state = useStudioStore.getState()
     const cover = state.document?.pages[0]
     expect(cover?.blocks).toHaveLength(4)
-    expect(cover?.blocks.at(-1)).toMatchObject({
+    const added = cover?.blocks.at(-1)
+    expect(added).toMatchObject({
       type: 'image',
       assetId: 'asset-1',
-      transform: { width: 0.42, height: 0.55, rotationDeg: 0 }
+      transform: { width: 0.42, rotationDeg: 0 }
     })
-    expect(cover?.blocks.at(-1)?.transform.x).toBeCloseTo(0.29)
-    expect(cover?.blocks.at(-1)?.transform.y).toBeCloseTo(0.225)
+    if (added?.type !== 'image') throw new Error('测试夹具不是图片 Block')
+    const asset = state.document?.assets[0]
+    if (!asset) throw new Error('缺少素材记录')
+    const visualRatio =
+      (added.transform.width * (state.document?.pageSpec.widthMm ?? 1)) /
+      (added.transform.height * (state.document?.pageSpec.heightMm ?? 1))
+    expect(visualRatio).toBeCloseTo(asset.width / asset.height, 6)
+    expect(added.transform.x).toBeCloseTo(0.29)
+    expect(added.transform.y).toBeCloseTo(0.27725)
     expect(state.selectedAssetIds).toEqual([])
 
     fireEvent.click(screen.getByRole('checkbox', { name: '选择 照片 1.jpg' }))
@@ -106,7 +116,7 @@ describe('ProjectAssetsPanel', () => {
     expect(state.document?.pages[0].blocks).toHaveLength(4)
   })
 
-  it('批量添加到当前纯图内容页时匹配对应布局', () => {
+  it('批量添加到当前页保持照片原图比例且不套固定布局', () => {
     openDocument(2, true)
     useStudioStore.getState().selectPage('page-content')
     useStudioStore.getState().setAssetSelection(['asset-1', 'asset-2'])
@@ -117,11 +127,20 @@ describe('ProjectAssetsPanel', () => {
 
     const state = useStudioStore.getState()
     const page = state.document?.pages.find((candidate) => candidate.id === 'page-content')
-    expect(page?.layoutId).toBe('split-even')
+    expect(page?.layoutId).toBeNull()
     expect(page?.blocks.map((block) => (block.type === 'image' ? block.assetId : null))).toEqual([
       'asset-1',
       'asset-2'
     ])
+    for (const block of page?.blocks ?? []) {
+      if (block.type !== 'image') throw new Error('测试夹具不是图片 Block')
+      const asset = state.document?.assets.find((candidate) => candidate.id === block.assetId)
+      if (!asset) throw new Error('缺少素材记录')
+      const visualRatio =
+        (block.transform.width * (state.document?.pageSpec.widthMm ?? 1)) /
+        (block.transform.height * (state.document?.pageSpec.heightMm ?? 1))
+      expect(visualRatio).toBeCloseTo(asset.width / asset.height, 6)
+    }
     expect(state.selectedAssetIds).toEqual([])
     expect(state.history.past).toHaveLength(1)
   })
@@ -139,8 +158,8 @@ describe('ProjectAssetsPanel', () => {
     const state = useStudioStore.getState()
     const pages = state.document?.pages.slice(1) ?? []
     expect(pages).toHaveLength(2)
-    expect(pages[0]?.layoutId).toBe('contact-six')
-    expect(pages[1]?.layoutId).toBe('focus')
+    expect(pages[0]?.layoutId).toBeNull()
+    expect(pages[1]?.layoutId).toBeNull()
     expect(
       pages.map((page) =>
         page.blocks.map((block) => (block.type === 'image' ? block.assetId : null))
@@ -154,7 +173,15 @@ describe('ProjectAssetsPanel', () => {
 
   it('空素材状态保留主操作，并展示逐文件导入失败原因', async () => {
     openDocument(0)
-    vi.mocked(platform.assets.import).mockResolvedValueOnce({
+    vi.mocked(platform.assets.pickCandidates).mockResolvedValueOnce([
+      {
+        id: 'candidate-1',
+        fileName: '无法解码的超长中文照片文件名.jpg',
+        byteSize: 2048,
+        previewUrl: 'blob:mock-preview'
+      }
+    ])
+    vi.mocked(platform.assets.importCandidates).mockResolvedValueOnce({
       assets: [],
       duplicateAssetIds: [],
       skipped: [{ fileName: '无法解码的超长中文照片文件名.jpg', reason: '图片编码损坏' }]
@@ -163,11 +190,69 @@ describe('ProjectAssetsPanel', () => {
 
     expect(screen.getByRole('heading', { name: '导入项目照片' })).toBeVisible()
     fireEvent.click(screen.getByRole('button', { name: '选择照片' }))
+    expect(await screen.findByRole('heading', { name: '选择要导入的照片' })).toBeVisible()
+    fireEvent.click(screen.getByRole('checkbox', { name: '选择 无法解码的超长中文照片文件名.jpg' }))
+    fireEvent.click(screen.getByRole('button', { name: '导入所选 1 张' }))
 
     const failureSummary = await screen.findByText('1 个文件未导入 · 查看详情')
     expect(failureSummary).toBeVisible()
     fireEvent.click(failureSummary)
     expect(screen.getByText('无法解码的超长中文照片文件名.jpg：图片编码损坏')).toBeVisible()
+    expect(platform.assets.releaseCandidates).toHaveBeenCalledWith(['candidate-1'])
+  })
+
+  it('只导入在候选对话框中勾选的照片，并释放未选择的预览', async () => {
+    openDocument(0)
+    vi.mocked(platform.assets.pickCandidates).mockResolvedValueOnce([
+      { id: 'candidate-1', fileName: '第一张.jpg', byteSize: 1024, previewUrl: 'blob:1' },
+      { id: 'candidate-2', fileName: '第二张.jpg', byteSize: 2048, previewUrl: 'blob:2' },
+      { id: 'candidate-3', fileName: '第三张.jpg', byteSize: 3072, previewUrl: 'blob:3' }
+    ])
+    vi.mocked(platform.assets.importCandidates).mockResolvedValueOnce({
+      assets: [asset(1)],
+      duplicateAssetIds: [],
+      skipped: []
+    })
+    renderPanel()
+
+    fireEvent.click(screen.getByRole('button', { name: '选择照片' }))
+    await screen.findByRole('heading', { name: '选择要导入的照片' })
+    fireEvent.click(screen.getByRole('checkbox', { name: '选择 第二张.jpg' }))
+    fireEvent.click(screen.getByRole('checkbox', { name: '选择 第三张.jpg' }))
+    expect(screen.getByText('2 / 3 张')).toBeVisible()
+    fireEvent.click(screen.getByRole('button', { name: '导入所选 2 张' }))
+
+    expect(platform.assets.importCandidates).toHaveBeenCalledWith(
+      expect.any(String),
+      ['candidate-2', 'candidate-3']
+    )
+    await waitFor(() =>
+      expect(platform.assets.releaseCandidates).toHaveBeenCalledWith([
+        'candidate-1',
+        'candidate-2',
+        'candidate-3'
+      ])
+    )
+    expect(useStudioStore.getState().document?.assets.map((candidate) => candidate.id)).toEqual([
+      'asset-1'
+    ])
+  })
+
+  it('取消候选对话框时释放全部预览并保持素材为空', async () => {
+    openDocument(0)
+    vi.mocked(platform.assets.pickCandidates).mockResolvedValueOnce([
+      { id: 'candidate-1', fileName: '第一张.jpg', byteSize: 1024, previewUrl: 'blob:1' },
+      { id: 'candidate-2', fileName: '第二张.jpg', byteSize: 2048, previewUrl: 'blob:2' }
+    ])
+    renderPanel()
+
+    fireEvent.click(screen.getByRole('button', { name: '选择照片' }))
+    await screen.findByRole('heading', { name: '选择要导入的照片' })
+    fireEvent.click(screen.getByRole('button', { name: '取消' }))
+
+    expect(platform.assets.releaseCandidates).toHaveBeenCalledWith(['candidate-1', 'candidate-2'])
+    expect(platform.assets.importCandidates).not.toHaveBeenCalled()
+    expect(useStudioStore.getState().document?.assets).toEqual([])
   })
 
   it('缺失素材显示重新定位入口并在恢复后清除缺失状态', async () => {
@@ -180,5 +265,77 @@ describe('ProjectAssetsPanel', () => {
 
     await waitFor(() => expect(platform.assets.relink).toHaveBeenCalledWith(document.id, 'asset-1'))
     expect(useStudioStore.getState().missingAssetIds).not.toContain('asset-1')
+  })
+
+  it('全屏模式开关把素材面板铺满窗口，Esc 退出', () => {
+    openDocument(2)
+    const { container } = renderPanel()
+
+    fireEvent.click(screen.getByRole('button', { name: '全屏查看素材' }))
+
+    expect(screen.getByRole('button', { name: '退出全屏' })).toBeVisible()
+    expect(container.querySelector('section')?.className).toContain('fixed inset-0')
+    expect(screen.getByText('2 张')).toBeVisible()
+
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(screen.getByRole('button', { name: '全屏查看素材' })).toBeVisible()
+    expect(container.querySelector('section')?.className).toContain('w-[360px]')
+  })
+
+  it('查看大图打开全屏预览，可左右翻看并关闭', () => {
+    openDocument(2)
+    renderPanel()
+
+    fireEvent.click(screen.getByRole('button', { name: '查看大图 照片 1.jpg' }))
+
+    const first = screen.getByRole('dialog', { name: '查看大图：照片 1.jpg' })
+    expect(first).toBeVisible()
+    expect(within(first).getByText('照片 1.jpg')).toBeVisible()
+    expect(screen.getByText('1 / 2')).toBeVisible()
+
+    fireEvent.keyDown(document, { key: 'ArrowRight' })
+    const second = screen.getByRole('dialog', { name: '查看大图：照片 2.jpg' })
+    expect(second).toBeVisible()
+    expect(screen.getByText('2 / 2')).toBeVisible()
+
+    fireEvent.click(screen.getByRole('button', { name: '上一张' }))
+    expect(screen.getByRole('dialog', { name: '查看大图：照片 1.jpg' })).toBeVisible()
+
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(screen.queryByRole('dialog', { name: /查看大图/ })).not.toBeInTheDocument()
+  })
+
+  it('全屏预览中可直接把照片添加到当前页', () => {
+    openDocument(1)
+    renderPanel()
+
+    fireEvent.click(screen.getByRole('button', { name: '查看大图 照片 1.jpg' }))
+    fireEvent.click(screen.getByRole('button', { name: '添加到当前页' }))
+
+    const state = useStudioStore.getState()
+    const cover = state.document?.pages[0]
+    expect(cover?.blocks).toHaveLength(4)
+    expect(cover?.blocks.at(-1)).toMatchObject({ type: 'image', assetId: 'asset-1' })
+  })
+
+  it('导入候选对话框可查看大图，Esc 只关预览不关对话框', async () => {
+    openDocument(0)
+    vi.mocked(platform.assets.pickCandidates).mockResolvedValueOnce([
+      { id: 'candidate-1', fileName: '第一张.jpg', byteSize: 1024, previewUrl: 'blob:1' },
+      { id: 'candidate-2', fileName: '第二张.jpg', byteSize: 2048, previewUrl: 'blob:2' }
+    ])
+    renderPanel()
+
+    fireEvent.click(screen.getByRole('button', { name: '选择照片' }))
+    await screen.findByRole('heading', { name: '选择要导入的照片' })
+
+    fireEvent.click(screen.getByRole('button', { name: '查看大图 第一张.jpg' }))
+    expect(screen.getByRole('dialog', { name: '查看大图：第一张.jpg' })).toBeVisible()
+    expect(screen.getByText('1 / 2')).toBeVisible()
+
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(screen.queryByRole('dialog', { name: /查看大图/ })).not.toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '选择要导入的照片' })).toBeVisible()
+    expect(platform.assets.releaseCandidates).not.toHaveBeenCalled()
   })
 })

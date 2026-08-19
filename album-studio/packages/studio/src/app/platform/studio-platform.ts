@@ -1,10 +1,21 @@
-import type { AlbumDocument, AssetRecord, CreateProjectRequest } from '@album-studio/common'
+import type {
+  AlbumDocument,
+  AssetRecord,
+  CreateProjectRequest,
+  EraseApplyResult,
+  EraseDetectResult,
+  ImageErase
+} from '@album-studio/common'
 import type { SaveDocumentResult } from '../project-save-session'
 
 export type { SaveDocumentResult } from '../project-save-session'
 
 export type StudioCapability =
-  'folder-import' | 'native-pdf' | 'asset-relink' | 'durable-project-folder'
+  | 'folder-import'
+  | 'native-pdf'
+  | 'asset-relink'
+  | 'durable-project-folder'
+  | 'erase-people'
 
 export type RecentStudioProject = Pick<AlbumDocument, 'id' | 'title' | 'themeId' | 'updatedAt'> & {
   missing: boolean
@@ -16,7 +27,17 @@ export type ImportAssetsResult = {
   skipped: Array<{ fileName: string; reason: string }>
 }
 
-export type AssetQuality = 'thumbnail' | 'preview' | 'print' | 'original'
+/** 导入前候选照片：只描述来源文件，尚未写入项目。previewUrl 由平台持有，关闭对话框后必须 releaseCandidates。 */
+export type ImportCandidate = {
+  id: string
+  fileName: string
+  byteSize: number
+  width?: number
+  height?: number
+  previewUrl: string
+}
+
+export type AssetQuality = 'thumbnail' | 'preview' | 'print' | 'original' | 'erased'
 
 export type AssetSourceRequest = {
   quality: AssetQuality
@@ -24,6 +45,8 @@ export type AssetSourceRequest = {
   pageWidthRatio?: number
   /** Block height divided by its album page height. */
   pageHeightRatio?: number
+  /** 消除结果取图键（quality 为 erased 时必填）。 */
+  eraseKey?: string
 }
 
 export type ExportDocumentResult = {
@@ -49,13 +72,19 @@ export interface StudioPlatform {
     save(document: AlbumDocument): Promise<SaveDocumentResult>
   }
   readonly assets: {
-    import(documentId: string, source: 'files' | 'folder'): Promise<ImportAssetsResult | null>
+    pickCandidates(documentId: string, source: 'files' | 'folder'): Promise<ImportCandidate[] | null>
+    importCandidates(documentId: string, candidateIds: string[]): Promise<ImportAssetsResult | null>
+    releaseCandidates(candidateIds: string[]): void
     relink(documentId: string, assetId: string): Promise<AssetRecord | null>
     getSource(documentId: string, assetId: string, request: AssetSourceRequest): Promise<string>
     releaseSource(source: string): void
   }
   readonly export: {
     pdf(document: AlbumDocument): Promise<ExportDocumentResult | null>
+  }
+  readonly imageErase: {
+    detect(documentId: string, assetId: string): Promise<EraseDetectResult>
+    apply(documentId: string, assetId: string, erase: ImageErase): Promise<EraseApplyResult>
   }
   readonly lifecycle: {
     onCloseRequest(listener: () => void): () => void

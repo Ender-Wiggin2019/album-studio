@@ -10,7 +10,9 @@ const api: AlbumStudioApi = Object.freeze({
     save: (input) => ipcRenderer.invoke(IPC_CHANNELS.projectsSave, input)
   }),
   assets: Object.freeze({
-    import: (input) => ipcRenderer.invoke(IPC_CHANNELS.assetsImport, input),
+    pickCandidates: (input) => ipcRenderer.invoke(IPC_CHANNELS.assetsPickCandidates, input),
+    importCandidates: (input) => ipcRenderer.invoke(IPC_CHANNELS.assetsImportCandidates, input),
+    releaseCandidates: (input) => ipcRenderer.invoke(IPC_CHANNELS.assetsReleaseCandidates, input),
     relink: (input) => ipcRenderer.invoke(IPC_CHANNELS.assetsRelink, input),
     url: (projectId, assetId, quality = 'preview', usage) => {
       const query = new URLSearchParams({
@@ -19,8 +21,13 @@ const api: AlbumStudioApi = Object.freeze({
       })
       if (usage?.width !== undefined) query.set('width', String(usage.width))
       if (usage?.height !== undefined) query.set('height', String(usage.height))
+      if (usage?.eraseKey !== undefined) query.set('erase', usage.eraseKey)
       return `album-asset://project/${encodeURIComponent(projectId)}/${encodeURIComponent(assetId)}?${query.toString()}`
     }
+  }),
+  imageErase: Object.freeze({
+    detect: (input) => ipcRenderer.invoke(IPC_CHANNELS.imageEraseDetect, input),
+    apply: (input) => ipcRenderer.invoke(IPC_CHANNELS.imageEraseApply, input)
   }),
   export: Object.freeze({
     pdf: (input) => ipcRenderer.invoke(IPC_CHANNELS.exportPdf, input)

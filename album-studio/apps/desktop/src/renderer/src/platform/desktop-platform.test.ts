@@ -37,9 +37,15 @@ function createApi(): AlbumStudioApi {
       save: vi.fn(async () => ({ revision: document.revision, savedAt: document.updatedAt }))
     },
     assets: {
-      import: vi.fn(async () => null),
+      pickCandidates: vi.fn(async () => null),
+      importCandidates: vi.fn(async () => null),
+      releaseCandidates: vi.fn(async () => undefined),
       relink: vi.fn(async () => null),
       url: vi.fn(() => 'album-asset://project/album-1/asset-1?quality=print')
+    },
+    imageErase: {
+      detect: vi.fn(async () => ({ maskBase64: 'iVBORw0KGgo=', width: 4000, height: 3000 })),
+      apply: vi.fn(async () => ({ eraseKey: 'a1b2c3', width: 4000, height: 3000 }))
     },
     export: { pdf: vi.fn(async () => null) },
     system: {
@@ -82,6 +88,29 @@ describe('createDesktopPlatform', () => {
     expect(api.assets.url).toHaveBeenCalledWith(document.id, 'asset-1', 'print', {
       width: 0.25,
       height: 1
+    })
+  })
+
+  it('maps candidate pick/import to the project path without leaking it', async () => {
+    const api = createApi()
+    const platform = createDesktopPlatform(api)
+    await platform.projects.listRecent()
+
+    await platform.assets.pickCandidates(document.id, 'folder')
+    expect(api.assets.pickCandidates).toHaveBeenCalledWith({
+      projectPath: '/private/album-path',
+      source: 'folder'
+    })
+
+    await platform.assets.importCandidates(document.id, ['candidate-1'])
+    expect(api.assets.importCandidates).toHaveBeenCalledWith({
+      projectPath: '/private/album-path',
+      candidateIds: ['candidate-1']
+    })
+
+    platform.assets.releaseCandidates(['candidate-1'])
+    expect(api.assets.releaseCandidates).toHaveBeenCalledWith({
+      candidateIds: ['candidate-1']
     })
   })
 })

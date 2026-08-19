@@ -85,4 +85,30 @@ describe('PageLayoutPanel', () => {
     expect(state.document?.revision).toBe(revisionBefore + 1)
     expect(state.history.past).toHaveLength(historyBefore + 1)
   })
+
+  it('自定义布局按原图比例自由排列照片并保持文字不动', async () => {
+    const user = userEvent.setup()
+    const beforeText = structuredClone(
+      useStudioStore.getState().document?.pages[1]?.blocks.find(
+        (block) => block.type === 'rich-text'
+      )
+    )
+    render(<PageLayoutPanel />)
+
+    await user.click(screen.getByRole('button', { name: /自定义布局/ }))
+
+    const state = useStudioStore.getState()
+    const afterPage = state.document?.pages[1]
+    expect(afterPage?.layoutId).toBe('free-form')
+    const image = afterPage?.blocks.find((block) => block.type === 'image')
+    if (image?.type !== 'image') throw new Error('缺少图片 Block')
+    const visualRatio =
+      (image.transform.width * (state.document?.pageSpec.widthMm ?? 1)) /
+      (image.transform.height * (state.document?.pageSpec.heightMm ?? 1))
+    expect(visualRatio).toBeCloseTo(1_600 / 1_200, 6)
+    expect(
+      afterPage?.blocks.find((block) => block.type === 'rich-text')
+    ).toEqual(beforeText)
+    expect(state.history.past.length).toBeGreaterThan(0)
+  })
 })

@@ -29,7 +29,7 @@ export default defineConfig({
     build: {
       externalizeDeps: false,
       rollupOptions: {
-        external: ['sharp']
+        external: ['sharp', 'onnxruntime-node']
       }
     }
   },

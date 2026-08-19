@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { getPageLayout } from './layouts'
+import { FREE_FORM_LAYOUT_ID, getPageLayout } from './layouts'
 
 export const ALBUM_DOCUMENT_SCHEMA_VERSION = 2 as const
 export const ALBUM_FORMAT_UPDATED_MESSAGE = '项目格式已更新，请新建项目' as const
@@ -19,13 +19,15 @@ export const PAGE_LAYOUT_IDS = [
   'contact-six',
   'image-text-focus',
   'two-image-story',
-  'three-image-note'
+  'three-image-note',
+  'free-form'
 ] as const
 export const PageLayoutIdSchema = z.enum(PAGE_LAYOUT_IDS)
 export type PageLayoutId = z.infer<typeof PageLayoutIdSchema>
 
 export const PAGE_SPEC_PRESETS = Object.freeze([
   Object.freeze({ presetId: 'a4-landscape', widthMm: 297, heightMm: 210 }),
+  Object.freeze({ presetId: 'a4-portrait', widthMm: 210, heightMm: 297 }),
   Object.freeze({ presetId: 'square-12', widthMm: 304.8, heightMm: 304.8 }),
   Object.freeze({ presetId: 'widescreen-16-9', widthMm: 338.67, heightMm: 190.5 })
 ] as const)
@@ -38,6 +40,13 @@ export const PageSpecSchema = z.discriminatedUnion('presetId', [
       presetId: z.literal('a4-landscape'),
       widthMm: z.literal(297),
       heightMm: z.literal(210)
+    })
+    .strict(),
+  z
+    .object({
+      presetId: z.literal('a4-portrait'),
+      widthMm: z.literal(210),
+      heightMm: z.literal(297)
     })
     .strict(),
   z
@@ -63,7 +72,7 @@ const normalizedLength = finiteNumber.gt(0).max(1)
 const percentageCoordinate = finiteNumber.min(0).max(100)
 const percentageLength = finiteNumber.gt(0).max(100)
 
-function transformsEqual(left: BlockTransform, right: Readonly<BlockTransform>): boolean {
+export function transformsEqual(left: BlockTransform, right: Readonly<BlockTransform>): boolean {
   return (
     left.x === right.x &&
     left.y === right.y &&
@@ -145,7 +154,11 @@ export const ImageEffectsSchema = z
     sepia: finiteNumber.min(0).max(1),
     grayscale: finiteNumber.min(0).max(1),
     blurPx: finiteNumber.min(0).max(20),
-    vignette: finiteNumber.min(0).max(1)
+    vignette: finiteNumber.min(0).max(1),
+    // 后加的滤镜参数必须带默认值，否则旧项目 manifest（无该字段）会被严格校验拒绝
+    beautySmooth: finiteNumber.min(0).max(1).default(0),
+    beautyWhiten: finiteNumber.min(0).max(1).default(0),
+    clarity: finiteNumber.min(0).max(1).default(0)
   })
   .strict()
 export type ImageEffects = z.infer<typeof ImageEffectsSchema>
@@ -165,6 +178,35 @@ export const ImageMaskSchema = z
   })
   .strict()
 export type ImageMask = z.infer<typeof ImageMaskSchema>
+
+export const ERASE_STROKE_MODES = ['add', 'subtract'] as const
+
+export const ErasePointSchema = z
+  .object({ x: normalizedCoordinate, y: normalizedCoordinate })
+  .strict()
+export type ErasePoint = z.infer<typeof ErasePointSchema>
+
+export const EraseStrokeSchema = z
+  .object({
+    mode: z.enum(ERASE_STROKE_MODES),
+    /** 笔刷直径占图片宽度的比例。 */
+    size: normalizedLength,
+    points: z.array(ErasePointSchema).min(2).max(2000)
+  })
+  .strict()
+export type EraseStroke = z.infer<typeof EraseStrokeSchema>
+
+/**
+ * 消除（AI 修补）参数，只保存参数不保存位图；
+ * 最终遮罩 = 自动识别遮罩（autoDetect）∪ 笔划（add 叠加 / subtract 抠除），可完全由参数重建。
+ */
+export const ImageEraseSchema = z
+  .object({
+    autoDetect: z.boolean(),
+    strokes: z.array(EraseStrokeSchema).max(200)
+  })
+  .strict()
+export type ImageErase = z.infer<typeof ImageEraseSchema>
 
 export const HexColorSchema = z.string().regex(/^#[0-9a-f]{6}$/i)
 export type HexColor = z.infer<typeof HexColorSchema>
@@ -336,7 +378,8 @@ export const ImageBlockSchema = z
     crop: ImageCropSchema,
     effects: ImageEffectsSchema,
     mask: ImageMaskSchema,
-    caption: ImageCaptionSchema
+    caption: ImageCaptionSchema,
+    erase: ImageEraseSchema.optional()
   })
   .strict()
 export type ImageBlock = z.infer<typeof ImageBlockSchema>
@@ -544,7 +587,7 @@ export const AlbumDocumentSchema = z
         }
       }
 
-      if (page.layoutId) {
+      if (page.layoutId && page.layoutId !== FREE_FORM_LAYOUT_ID) {
         const layout = getPageLayout(page.layoutId)
         const imageBlocks = page.blocks.filter((block) => block.type === 'image')
         const richTextBlocks = page.blocks.filter((block) => block.type === 'rich-text')
