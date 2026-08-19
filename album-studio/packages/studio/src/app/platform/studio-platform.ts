@@ -4,18 +4,17 @@ import type {
   CreateProjectRequest,
   EraseApplyResult,
   EraseDetectResult,
-  ImageErase
+  ImageCrop,
+  ImageErase,
+  ImportCandidate as CommonImportCandidate,
+  ImportCandidateSession as CommonImportCandidateSession
 } from '@album-studio/common'
 import type { SaveDocumentResult } from '../project-save-session'
 
 export type { SaveDocumentResult } from '../project-save-session'
 
 export type StudioCapability =
-  | 'folder-import'
-  | 'native-pdf'
-  | 'asset-relink'
-  | 'durable-project-folder'
-  | 'erase-people'
+  'folder-import' | 'native-pdf' | 'asset-relink' | 'durable-project-folder' | 'erase-people'
 
 export type RecentStudioProject = Pick<AlbumDocument, 'id' | 'title' | 'themeId' | 'updatedAt'> & {
   missing: boolean
@@ -27,15 +26,10 @@ export type ImportAssetsResult = {
   skipped: Array<{ fileName: string; reason: string }>
 }
 
-/** 导入前候选照片：只描述来源文件，尚未写入项目。previewUrl 由平台持有，关闭对话框后必须 releaseCandidates。 */
-export type ImportCandidate = {
-  id: string
-  fileName: string
-  byteSize: number
-  width?: number
-  height?: number
-  previewUrl: string
-}
+/** 导入前候选照片：只描述来源文件，尚未写入项目。previewUrl 由平台持有。 */
+export type ImportCandidate = CommonImportCandidate
+/** 候选会话绑定打开它的项目；关闭、替换或卸载后必须按会话 ID 释放。 */
+export type ImportCandidateSession = CommonImportCandidateSession
 
 export type AssetQuality = 'thumbnail' | 'preview' | 'print' | 'original' | 'erased'
 
@@ -45,6 +39,8 @@ export type AssetSourceRequest = {
   pageWidthRatio?: number
   /** Block height divided by its album page height. */
   pageHeightRatio?: number
+  /** 打印派生图按最终可见裁剪区 cover Block 所需的尺寸生成。 */
+  crop?: ImageCrop
   /** 消除结果取图键（quality 为 erased 时必填）。 */
   eraseKey?: string
 }
@@ -72,9 +68,16 @@ export interface StudioPlatform {
     save(document: AlbumDocument): Promise<SaveDocumentResult>
   }
   readonly assets: {
-    pickCandidates(documentId: string, source: 'files' | 'folder'): Promise<ImportCandidate[] | null>
-    importCandidates(documentId: string, candidateIds: string[]): Promise<ImportAssetsResult | null>
-    releaseCandidates(candidateIds: string[]): void
+    pickCandidates(
+      documentId: string,
+      source: 'files' | 'folder'
+    ): Promise<ImportCandidateSession | null>
+    importCandidates(
+      documentId: string,
+      sessionId: string,
+      candidateIds: string[]
+    ): Promise<ImportAssetsResult | null>
+    releaseCandidates(sessionId: string): Promise<void>
     relink(documentId: string, assetId: string): Promise<AssetRecord | null>
     getSource(documentId: string, assetId: string, request: AssetSourceRequest): Promise<string>
     releaseSource(source: string): void

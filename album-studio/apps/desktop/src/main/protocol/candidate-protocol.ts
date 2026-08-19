@@ -5,11 +5,13 @@ const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/
 
 export type CandidatePreviewResolver = {
   resolveCandidatePreview(
+    sessionId: string,
     candidateId: string
   ): Promise<{ data: Buffer; contentType: string } | null>
 }
 
 export type ParsedCandidateProtocolRequest = {
+  sessionId: string
   candidateId: string
 }
 
@@ -21,7 +23,7 @@ function notFound(): Response {
 }
 
 /**
- * 候选照片预览地址：album-candidate://preview/<candidateId>?v=<version>。
+ * 候选照片预览地址：album-candidate://preview/<sessionId>/<candidateId>?v=<version>。
  * 候选会话由 AssetService 持有，只在“选择照片 → 导入所选”期间有效。
  */
 export function parseCandidateProtocolRequest(requestUrl: string): ParsedCandidateProtocolRequest {
@@ -30,15 +32,17 @@ export function parseCandidateProtocolRequest(requestUrl: string): ParsedCandida
     throw new Error('候选照片地址无效。')
   }
   const segments = url.pathname.split('/').slice(1)
-  if (segments.length !== 1 || segments.some((segment) => segment.length === 0)) {
+  if (segments.length !== 2 || segments.some((segment) => segment.length === 0)) {
     throw new Error('候选照片地址路径无效。')
   }
-  const candidateId = decodeURIComponent(segments[0])
+  const sessionId = decodeURIComponent(segments[0])
+  const candidateId = decodeURIComponent(segments[1])
+  if (!SAFE_ID.test(sessionId)) throw new Error('候选照片会话 ID 无效。')
   if (!SAFE_ID.test(candidateId)) throw new Error('候选照片 ID 无效。')
   if (url.searchParams.get('v') !== IMAGE_PIPELINE_VERSION) {
     throw new Error('候选照片缓存版本无效。')
   }
-  return { candidateId }
+  return { sessionId, candidateId }
 }
 
 export async function createCandidateProtocolResponse(
@@ -46,8 +50,8 @@ export async function createCandidateProtocolResponse(
   resolver: CandidatePreviewResolver
 ): Promise<Response> {
   try {
-    const { candidateId } = parseCandidateProtocolRequest(requestUrl)
-    const preview = await resolver.resolveCandidatePreview(candidateId)
+    const { sessionId, candidateId } = parseCandidateProtocolRequest(requestUrl)
+    const preview = await resolver.resolveCandidatePreview(sessionId, candidateId)
     if (!preview) return notFound()
     const buffer = preview.data
     const body = buffer.buffer.slice(

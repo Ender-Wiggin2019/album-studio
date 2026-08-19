@@ -1,96 +1,123 @@
 import { describe, expect, it } from 'vitest'
-import { compositeErase } from './inference-service'
-
-/** 4×4 场景：ring 像素只出现在 index 4；便于手算验证。 */
-const width = 4
-const height = 4
-
-// mask：index 4 为 0（环带），5–7 为 255（内部），8 为 100（软边），其余 0
-const mask = Uint8Array.from([0, 0, 0, 0, 0, 255, 255, 255, 100, 0, 0, 0, 0, 0, 0, 0])
-// feather：index 4 羽化非零（遮罩外），5 为 128（边界），6–8 为 255，其余 0
-const feather = Uint8Array.from([0, 0, 0, 0, 200, 128, 255, 255, 255, 0, 0, 0, 0, 0, 0, 0])
-// 原图：全像素 [100,120,140]
-const original = Uint8Array.from({ length: width * height * 3 }, (_, i) => {
-  const channel = i % 3
-  return channel === 0 ? 100 : channel === 1 ? 120 : 140
-})
-// 模型：环带像素(4) [80,100,130]；核心像素(6,7) [90,100,110]；其余 [40,50,60]
-const model = Uint8Array.from({ length: width * height * 3 }, (_, i) => {
-  const pixel = Math.floor(i / 3)
-  const channel = i % 3
-  const base = pixel === 4 ? [80, 100, 130] : pixel === 6 || pixel === 7 ? [90, 100, 110] : [40, 50, 60]
-  return base[channel]
-})
-// 颗粒关闭：blurredOriginal = original（高频残差为 0）
-const blurredOriginal = Uint8Array.from(original)
+import sharp from 'sharp'
+import {
+  compositeErase,
+  decodeSrgb,
+  decodeSrgba,
+  expandBinaryMask,
+  resizeBinaryMask
+} from './inference-service'
 
 describe('compositeErase', () => {
-  it('遮罩外的像素 1:1 保留原图，即使羽化非零也不渗入模型输出', () => {
-    const result = compositeErase(original, model, mask, feather, blurredOriginal, width, height)
-    // index 4：mask=0 但 feather=200 —— 关键回归：模型输出不得作用到遮罩外
-    for (const pixel of [0, 1, 2, 3, 4, 9, 10, 11, 12, 13, 14, 15]) {
-      const o = pixel * 3
-      expect(result[o]).toBe(100)
-      expect(result[o + 1]).toBe(120)
-      expect(result[o + 2]).toBe(140)
+  it('小遮罩内部完整使用修补结果，不会把原图混回后只显得变淡', () => {
+    const original = Uint8Array.from([200, 180, 160, 77])
+    const model = Uint8Array.from([40, 60, 80])
+    const mask = Uint8Array.from([255])
+
+    const result = compositeErase(original, model, mask, 1, 1)
+
+    expect([...result]).toEqual([40, 60, 80, 77])
+  })
+
+  it('遮罩外 RGB 逐字节保留，遮罩内外都保留原图 alpha', () => {
+    const original = Uint8Array.from([10, 20, 30, 0, 40, 50, 60, 96])
+    const model = Uint8Array.from([110, 120, 130, 140, 150, 160])
+    const mask = Uint8Array.from([0, 255])
+
+    const result = compositeErase(original, model, mask, 2, 1)
+
+    expect([...result]).toEqual([10, 20, 30, 0, 140, 150, 160, 96])
+  })
+
+  it('使用 128 作为二值遮罩边界，不把插值产生的微弱灰度当成要消除的区域', () => {
+    const original = Uint8Array.from([10, 20, 30, 10, 40, 50, 60, 20, 70, 80, 90, 30])
+    const model = Uint8Array.from([110, 120, 130, 140, 150, 160, 170, 180, 190])
+    const mask = Uint8Array.from([1, 127, 128])
+
+    const result = compositeErase(original, model, mask, 3, 1)
+
+    expect([...result]).toEqual([10, 20, 30, 10, 40, 50, 60, 20, 170, 180, 190, 30])
+  })
+
+  it('不用外环平均色改写模型已经给出的局部颜色', () => {
+    const original = Uint8Array.from([220, 220, 220, 255, 20, 30, 40, 128, 220, 220, 220, 255])
+    const model = Uint8Array.from([220, 220, 220, 60, 100, 70, 220, 220, 220])
+    const mask = Uint8Array.from([0, 255, 0])
+
+    const result = compositeErase(original, model, mask, 3, 1)
+
+    expect([...result.subarray(4, 8)]).toEqual([60, 100, 70, 128])
+  })
+})
+
+describe('resizeBinaryMask', () => {
+  it('缩小后仍是 0/1 二值遮罩，不把 Lanczos 光晕扩大为模型洞区', async () => {
+    const width = 100
+    const height = 100
+    const mask = new Uint8Array(width * height)
+    for (let y = 40; y < 60; y++) {
+      for (let x = 40; x < 60; x++) mask[y * width + x] = 255
     }
+
+    const resized = await resizeBinaryMask(mask, width, height, 17, 17)
+
+    expect([...new Set(resized)]).toEqual([0, 1])
+    expect(resized.reduce((sum, value) => sum + value, 0)).toBe(9)
+  })
+})
+
+describe('expandBinaryMask', () => {
+  it('用硬边界扩张前景，不产生会混合原图的灰度边缘', async () => {
+    const width = 9
+    const height = 9
+    const mask = new Uint8Array(width * height)
+    mask[4 * width + 4] = 255
+
+    const expanded = await expandBinaryMask(mask, width, height, 2)
+
+    expect([...new Set(expanded)]).toEqual([0, 255])
+    expect(expanded.reduce((sum, value) => sum + (value > 0 ? 1 : 0), 0)).toBe(25)
   })
 
-  it('遮罩内部使用模型输出，并按“环带原图 − 核心模型”均值差对齐颜色', () => {
-    const result = compositeErase(original, model, mask, feather, blurredOriginal, width, height)
-    // 偏移 = 环带原图均值 [100,120,140] − 核心模型均值 [90,100,110] = [10,20,30]
-    // 内部像素(6,7)：alpha=1，输出 = 模型[90,100,110] + 偏移 = [100,120,140]
-    for (const pixel of [6, 7]) {
-      const o = pixel * 3
-      expect(result[o]).toBe(100)
-      expect(result[o + 1]).toBe(120)
-      expect(result[o + 2]).toBe(140)
-    }
-  })
+  it('仅扩张模型输入，最终硬合成仍遵守原始遮罩边界', async () => {
+    const width = 3
+    const height = 3
+    const mask = new Uint8Array(width * height)
+    mask[4] = 255
+    const expandedModelMask = await expandBinaryMask(mask, width, height, 1)
+    const original = new Uint8Array(width * height * 4).fill(10)
+    const model = new Uint8Array(width * height * 3).fill(200)
 
-  it('边界像素按 min(羽化, 遮罩) 的 alpha 渐变合成', () => {
-    const result = compositeErase(original, model, mask, feather, blurredOriginal, width, height)
-    // index 5：mask=255, feather=128 → alpha=128/255≈0.502
-    // filled = 模型[40,50,60] + 偏移[10,20,30] = [50,70,90]
-    // output = round(orig*0.498 + filled*0.502) = [75, 95, 115]
-    const o = 5 * 3
-    expect(result[o]).toBe(75)
-    expect(result[o + 1]).toBe(95)
-    expect(result[o + 2]).toBe(115)
-  })
+    const result = compositeErase(original, model, mask, width, height)
 
-  it('软边遮罩按遮罩值限制 alpha', () => {
-    const result = compositeErase(original, model, mask, feather, blurredOriginal, width, height)
-    // index 8：mask=100, feather=255 → alpha=100/255≈0.392；filled = [50,70,90]
-    const o = 8 * 3
-    expect(result[o]).toBe(80)
-    expect(result[o + 1]).toBe(100)
-    expect(result[o + 2]).toBe(120)
+    expect(expandedModelMask[3]).toBe(255)
+    expect([...result.subarray(3 * 4, 3 * 4 + 4)]).toEqual([10, 10, 10, 10])
+    expect([...result.subarray(4 * 4, 4 * 4 + 4)]).toEqual([200, 200, 200, 10])
   })
+})
 
-  it('空遮罩时输出与原图逐字节一致', () => {
-    const emptyMask = new Uint8Array(width * height)
-    const fullFeather = new Uint8Array(width * height).fill(255)
-    const result = compositeErase(original, model, emptyMask, fullFeather, blurredOriginal, width, height)
-    expect(Buffer.from(result)).toEqual(Buffer.from(original))
+describe('decodeSrgb', () => {
+  it('统一输出 sRGB 三通道像素，不把 RGBA 按 RGB 错位读取', async () => {
+    const rgba = Buffer.from([255, 0, 0, 128, 0, 255, 0, 64])
+    const png = await sharp(rgba, { raw: { width: 2, height: 1, channels: 4 } })
+      .png()
+      .toBuffer()
+
+    const rgb = await decodeSrgb(png, 2, 1)
+
+    expect([...rgb]).toEqual([255, 0, 0, 0, 255, 0])
   })
+})
 
-  it('全遮罩（无环带）时输出等于模型输出', () => {
-    const fullMask = new Uint8Array(width * height).fill(255)
-    const fullFeather = new Uint8Array(width * height).fill(255)
-    const result = compositeErase(original, model, fullMask, fullFeather, blurredOriginal, width, height)
-    expect(Buffer.from(result)).toEqual(Buffer.from(model))
-  })
+describe('decodeSrgba', () => {
+  it('解码带 alpha 的原图时保留每个像素的透明度', async () => {
+    const rgba = Buffer.from([255, 0, 0, 0, 0, 255, 0, 96])
+    const png = await sharp(rgba, { raw: { width: 2, height: 1, channels: 4 } })
+      .png()
+      .toBuffer()
 
-  it('颗粒：相同种子结果确定，不同种子结果不同', () => {
-    const zeros = new Uint8Array(width * height * 3)
-    const a = compositeErase(original, model, mask, feather, zeros, width, height, 42)
-    const aAgain = compositeErase(original, model, mask, feather, zeros, width, height, 42)
-    const b = compositeErase(original, model, mask, feather, zeros, width, height, 43)
-    expect(Buffer.from(a)).toEqual(Buffer.from(aAgain))
-    expect(Buffer.from(a)).not.toEqual(Buffer.from(b))
-    // 遮罩外仍不受颗粒影响
-    const o = 4 * 3
-    expect(a[o]).toBe(100)
+    const decoded = await decodeSrgba(png, 2, 1)
+
+    expect([decoded[3], decoded[7]]).toEqual([0, 96])
   })
 })

@@ -1,5 +1,8 @@
 import type { ImageErase } from './schema'
 
+/** 仅影响消除结果，避免调整算法时让其它图片派生缓存全部失效。 */
+export const ERASE_PIPELINE_VERSION = '2' as const
+
 /**
  * 消除参数的稳定缓存键。
  *
@@ -12,7 +15,7 @@ export function eraseKeyFor(erase: ImageErase): string {
   const canonical = canonicalize(erase)
   const first = fnv1a(`${canonical}\u0001`)
   const second = fnv1a(`${canonical}\u0002`)
-  return `${first.toString(36)}${second.toString(36)}`
+  return `e${ERASE_PIPELINE_VERSION}${first.toString(36)}${second.toString(36)}`
 }
 
 function canonicalize(value: unknown): string {

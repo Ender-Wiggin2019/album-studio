@@ -43,6 +43,42 @@ describe('resumeLastProject', () => {
     expect(document?.title).toBe('p2')
   })
 
+  it('最近项目打开失败时依次尝试下一个可用项目', async () => {
+    const open = vi.fn(async (id: string) => {
+      if (id === 'p1') throw new Error('项目已损坏')
+      return openDocument(id)
+    })
+
+    const document = await resumeLastProject({
+      listRecent: vi.fn(async () => [recentItem({ id: 'p1' }), recentItem({ id: 'p2' })]),
+      open
+    })
+
+    expect(open).toHaveBeenCalledTimes(2)
+    expect(open).toHaveBeenNthCalledWith(1, 'p1')
+    expect(open).toHaveBeenNthCalledWith(2, 'p2')
+    expect(document?.title).toBe('p2')
+  })
+
+  it('StrictMode 并发重入时只执行一次最近项目恢复', async () => {
+    let resolveRecent!: (items: RecentStudioProject[]) => void
+    const recent = new Promise<RecentStudioProject[]>((resolve) => {
+      resolveRecent = resolve
+    })
+    const listRecent = vi.fn(() => recent)
+    const open = vi.fn(async (id: string) => openDocument(id))
+    const projects = { listRecent, open }
+
+    const first = resumeLastProject(projects)
+    const second = resumeLastProject(projects)
+    resolveRecent([recentItem({ id: 'p1' })])
+
+    const [firstDocument, secondDocument] = await Promise.all([first, second])
+    expect(listRecent).toHaveBeenCalledTimes(1)
+    expect(open).toHaveBeenCalledTimes(1)
+    expect(firstDocument).toBe(secondDocument)
+  })
+
   it('没有可用相册时返回 null 且不打开任何项目', async () => {
     const open = vi.fn(async (id: string) => openDocument(id))
     const document = await resumeLastProject({

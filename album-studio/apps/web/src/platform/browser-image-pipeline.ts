@@ -1,5 +1,6 @@
 import createPica from 'pica'
 import { createSHA256 } from 'hash-wasm'
+import { coverImageDerivativeSize, type ImageCrop, type PixelSize } from '@album-studio/common'
 
 export const MAX_IMAGE_PIXELS = 80_000_000
 const pica = createPica({ concurrency: 2, features: ['js', 'wasm', 'ww'] })
@@ -8,6 +9,34 @@ export type BrowserImageMetadata = {
   contentHash: string
   width: number
   height: number
+}
+
+export type WebpDerivativeBounds = Readonly<{
+  width: number
+  height: number
+  quality: number
+  fit?: 'inside' | 'cover'
+  crop?: ImageCrop
+  maximumPixels?: number
+}>
+
+export function derivativeCanvasSize(
+  sourceSize: PixelSize,
+  bounds: WebpDerivativeBounds
+): PixelSize {
+  if (bounds.fit === 'cover') {
+    return coverImageDerivativeSize({
+      sourceSize,
+      viewportSize: bounds,
+      crop: bounds.crop,
+      maximumPixels: bounds.maximumPixels
+    })
+  }
+  const scale = Math.min(1, bounds.width / sourceSize.width, bounds.height / sourceSize.height)
+  return {
+    width: Math.max(1, Math.round(sourceSize.width * scale)),
+    height: Math.max(1, Math.round(sourceSize.height * scale))
+  }
 }
 
 export async function hashBlob(blob: Blob): Promise<string> {
@@ -42,14 +71,14 @@ export async function inspectImage(file: File): Promise<BrowserImageMetadata> {
 
 export async function createWebpDerivative(
   source: Blob,
-  bounds: { width: number; height: number; quality: number }
+  bounds: WebpDerivativeBounds
 ): Promise<Blob> {
   const bitmap = await createImageBitmap(source, { imageOrientation: 'from-image' })
   try {
-    const scale = Math.min(1, bounds.width / bitmap.width, bounds.height / bitmap.height)
+    const output = derivativeCanvasSize(bitmap, bounds)
     const targetCanvas = document.createElement('canvas')
-    targetCanvas.width = Math.max(1, Math.round(bitmap.width * scale))
-    targetCanvas.height = Math.max(1, Math.round(bitmap.height * scale))
+    targetCanvas.width = output.width
+    targetCanvas.height = output.height
 
     await pica.resize(bitmap, targetCanvas)
     return pica.toBlob(targetCanvas, 'image/webp', bounds.quality)

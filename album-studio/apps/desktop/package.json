@@ -15,18 +15,18 @@
     "start": "electron-vite preview",
     "dev": "electron-vite dev",
     "build": "npm run typecheck && electron-vite build",
-    "build:unpack": "npm run build && electron-builder --dir",
-    "build:win": "npm run build && electron-builder --win --x64",
-    "build:mac": "npm run build && electron-builder --mac --universal",
+    "build:unpack": "npm run download:models && npm run build && electron-builder --dir",
+    "build:win": "npm run download:models && npm run build && electron-builder --win --x64",
+    "build:mac": "npm run download:models && npm run build && electron-builder --mac --universal",
     "verify:package": "node scripts/verify-packaged.mjs",
-    "test": "vitest run && node --test ../../scripts/dev.test.mjs",
+    "test": "vitest run && node --test scripts/download-models.test.mjs scripts/package-integrity.test.mjs ../../scripts/dev.test.mjs",
     "test:watch": "vitest",
     "test:dev-smoke": "node scripts/dev-smoke.mjs",
-    "test:e2e": "npm run build && playwright test",
+    "test:e2e": "npm run build && playwright test smoke.spec.ts",
     "test:e2e:packaged": "npm run build:unpack && playwright test packaged-erase.spec.ts brush-alignment.spec.ts"
   },
   "dependencies": {
-    "onnxruntime-node": "1.27.0",
+    "onnxruntime-node": "1.23.2",
     "sharp": "0.35.3"
   },
   "devDependencies": {

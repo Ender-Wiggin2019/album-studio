@@ -19,6 +19,7 @@ files:
   - node_modules/@img/**
   - node_modules/@emnapi/**
   - node_modules/onnxruntime-node/**
+  - node_modules/onnxruntime-common/**
   - node_modules/detect-libc/**
   - node_modules/semver/**
   - node_modules/tslib/**
@@ -26,6 +27,7 @@ asarUnpack:
   - '**/node_modules/sharp/**/*'
   - '**/node_modules/@img/**/*'
   - '**/node_modules/onnxruntime-node/**/*'
+  - '**/node_modules/onnxruntime-common/**/*'
 # AI 模型走 extraResources（不受 .gitignore 排除影响），打包后位于 resources/models
 extraResources:
   - from: resources/models
@@ -47,7 +49,7 @@ mac:
   hardenedRuntime: false
   entitlementsInherit: build/entitlements.mac.plist
   category: public.app-category.photography
-  x64ArchFiles: Contents/Resources/app.asar.unpacked/node_modules/@img/**/*
+  x64ArchFiles: Contents/Resources/app.asar.unpacked/node_modules/{@img/**/*,onnxruntime-node/bin/napi-v6/darwin/**/*}
   target:
     - target: dmg
       arch:

@@ -5,6 +5,7 @@ import {
   EraseDetectRequestSchema,
   EraseDetectResultSchema,
   ImportCandidateSchema,
+  ImportCandidateSessionSchema,
   ImportCandidatesRequestSchema,
   PickImportCandidatesRequestSchema,
   ReleaseCandidatesRequestSchema
@@ -137,6 +138,25 @@ describe('Import candidate IPC contracts', () => {
     ).toBe(false)
   })
 
+  it('binds picked candidates to one explicit session', () => {
+    expect(
+      ImportCandidateSessionSchema.parse({
+        id: 'session-a',
+        candidates: [
+          {
+            id: 'candidate-1',
+            fileName: '海边.jpg',
+            byteSize: 2048,
+            previewUrl: 'album-candidate://preview/session-a/candidate-1?v=1'
+          }
+        ]
+      })
+    ).toMatchObject({ id: 'session-a', candidates: [{ id: 'candidate-1' }] })
+    expect(
+      ImportCandidateSessionSchema.safeParse({ id: 'session-a', candidates: [] }).success
+    ).toBe(false)
+  })
+
   it('validates pick/import/release requests strictly', () => {
     expect(
       PickImportCandidatesRequestSchema.parse({ projectPath: 'p1', source: 'folder' })
@@ -151,19 +171,28 @@ describe('Import candidate IPC contracts', () => {
     expect(
       ImportCandidatesRequestSchema.parse({
         projectPath: 'p1',
+        sessionId: 'session-a',
         candidateIds: ['candidate-1']
       })
-    ).toEqual({ projectPath: 'p1', candidateIds: ['candidate-1'] })
+    ).toEqual({ projectPath: 'p1', sessionId: 'session-a', candidateIds: ['candidate-1'] })
     expect(
       ImportCandidatesRequestSchema.safeParse({
         projectPath: 'p1',
+        sessionId: 'session-a',
         candidateIds: ['']
       }).success
     ).toBe(false)
+    expect(
+      ImportCandidatesRequestSchema.safeParse({
+        projectPath: 'p1',
+        sessionId: 'session-a',
+        candidateIds: []
+      }).success
+    ).toBe(false)
 
-    expect(ReleaseCandidatesRequestSchema.parse({ candidateIds: ['candidate-1'] })).toEqual({
-      candidateIds: ['candidate-1']
+    expect(ReleaseCandidatesRequestSchema.parse({ sessionId: 'session-a' })).toEqual({
+      sessionId: 'session-a'
     })
-    expect(ReleaseCandidatesRequestSchema.safeParse({ candidateIds: [] }).success).toBe(true)
+    expect(ReleaseCandidatesRequestSchema.safeParse({ sessionId: '' }).success).toBe(false)
   })
 })

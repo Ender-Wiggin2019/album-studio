@@ -107,10 +107,10 @@ describe('PhotoEditWorkspace 自动美化', () => {
     await user.click(screen.getByRole('button', { name: '自动美化' }))
     await waitFor(() => expect(screen.getByText('1.20×')).toBeInTheDocument())
     expect(autoEnhanceImageSource).toHaveBeenCalledWith('blob:fake-source', {
-      x: 0,
-      y: 0,
-      width: 100,
-      height: 100
+      area: { x: 0, y: 0, width: 100, height: 100 },
+      rotationDeg: 0,
+      flipX: false,
+      flipY: false
     })
 
     // 未点击"应用到照片"前，文档不被修改
@@ -151,6 +151,7 @@ describe('PhotoEditWorkspace 自动美化', () => {
     await user.click(screen.getByRole('button', { name: '自动美化' }))
     const analyzing = screen.getByRole('button', { name: '正在分析…' })
     expect(analyzing).toBeDisabled()
+    expect(screen.getByRole('button', { name: '应用到照片' })).toBeDisabled()
 
     resolveAnalysis({ brightness: 1.2, contrast: 1.1, saturation: 1.15 })
     await waitFor(() => expect(screen.getByRole('button', { name: '自动美化' })).toBeEnabled())

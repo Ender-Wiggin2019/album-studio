@@ -5,7 +5,8 @@ import {
   ImageEraseSchema,
   PageSpecSchema,
   ThemeIdSchema,
-  type AssetRecord
+  type AssetRecord,
+  type ImageCrop
 } from '../album/schema'
 
 export const IPC_CHANNELS = {
@@ -82,6 +83,14 @@ export const ImportCandidateSchema = z
   .strict()
 export type ImportCandidate = z.infer<typeof ImportCandidateSchema>
 
+export const ImportCandidateSessionSchema = z
+  .object({
+    id: z.string().min(1).max(128),
+    candidates: z.array(ImportCandidateSchema).min(1)
+  })
+  .strict()
+export type ImportCandidateSession = z.infer<typeof ImportCandidateSessionSchema>
+
 export const PickImportCandidatesRequestSchema = z
   .object({
     projectPath: z.string().min(1),
@@ -93,14 +102,15 @@ export type PickImportCandidatesRequest = z.infer<typeof PickImportCandidatesReq
 export const ImportCandidatesRequestSchema = z
   .object({
     projectPath: z.string().min(1),
-    candidateIds: z.array(z.string().min(1))
+    sessionId: z.string().min(1).max(128),
+    candidateIds: z.array(z.string().min(1)).min(1)
   })
   .strict()
 export type ImportCandidatesRequest = z.infer<typeof ImportCandidatesRequestSchema>
 
 export const ReleaseCandidatesRequestSchema = z
   .object({
-    candidateIds: z.array(z.string().min(1))
+    sessionId: z.string().min(1).max(128)
   })
   .strict()
 export type ReleaseCandidatesRequest = z.infer<typeof ReleaseCandidatesRequestSchema>
@@ -193,7 +203,7 @@ export type AlbumStudioApi = {
     save: (input: SaveProjectRequest) => Promise<SaveProjectResult>
   }
   assets: {
-    pickCandidates: (input: PickImportCandidatesRequest) => Promise<ImportCandidate[] | null>
+    pickCandidates: (input: PickImportCandidatesRequest) => Promise<ImportCandidateSession | null>
     importCandidates: (input: ImportCandidatesRequest) => Promise<ImportAssetsResult | null>
     releaseCandidates: (input: ReleaseCandidatesRequest) => Promise<void>
     relink: (input: RelinkAssetRequest) => Promise<AssetRecord | null>
@@ -201,7 +211,7 @@ export type AlbumStudioApi = {
       projectId: string,
       assetId: string,
       quality?: 'thumbnail' | 'preview' | 'print' | 'original' | 'erased',
-      usage?: { width?: number; height?: number; eraseKey?: string }
+      usage?: { width?: number; height?: number; crop?: ImageCrop; eraseKey?: string }
     ) => string
   }
   imageErase: {

@@ -295,3 +295,60 @@ Web Playwright 回归先在东南缩放柄 `mouse.down()` 后稳定红灯，再�
 富文本使用 common 严格 schema 与 Studio Lexical 适配层，支持已确认的字体、字号、颜色、行内样式、对齐、行距和列表；输入先进入 transient draft，保存会话在失焦、切页、预览、导出、返回和关闭前提交。照片说明也补上了面板卸载提交，避免切换右栏标签丢失最后输入。Lexical 和组件目录均按需加载；最终 desktop 构建的对应独立 chunk 为 267.17 kB 与 4.85 kB，editor workspace chunk 从拆分前 284.24 kB 降为 280.23 kB。
 
 最终本机证据：common 37、Studio 62、desktop 32、Windows 启动逻辑 4 项测试通过；`npm run check` 覆盖 lint、全 workspace typecheck/test、双端 production build、真实 Electron dev/CSP/HMR smoke 和 Web E2E，并已通过；`npm run test:e2e:all` 中 Electron 3/3、Web 1/1 通过。视觉检查覆盖 1440×900、1100×720、800×640、长中文、空素材、中文导入失败和缺失资源；`git diff --check` 通过。Windows 原生打包与运行证据仍只由 Windows 主机或原生 CI 提供。
+
+---
+
+## 当前任务：Review 并修复最新图像编辑提交
+
+> 状态：已完成（2026-08-19）
+>
+> 建立日期：2026-08-19
+>
+> 审查对象：`5104252 feat: 图像编辑能力增强（消除人物/美颜/自动增强/清晰度/裁剪重构）`
+
+### 范围与实施假设
+
+- [x] 保持既定的默认 A4 横向；用户反馈的“竖排 A4 显示不全”按画布初始适配错误处理，不擅自改变新建项目默认规格。四种 `PageSpec` 都必须同时受可用宽度和高度约束。
+- [x] “完整组件库”解释为：补齐当前产品真实使用到的共享 shadcn 原语和业务组合，并把本次新增界面迁入同一套视觉/交互契约；不执行 `shadcn add --all`，也不在本轮凭空扩充右栏贴纸/Icon 素材数量。
+- [x] shadcn 当前有效配置仍为 Nova + Radix + Lucide + Tailwind v4；`minimal` 作为视觉方向实现为语义 token、统一密度、克制圆角/阴影和共享工作区壳层，不切换到不存在的 preset。
+- [x] 保持 Everything is a Block、统一 `AlbumPageView` 渲染链和现有 v2 schema；不借机重构无关功能。
+
+### 已确认基线与根因
+
+- [x] Node.js `v22.22.0` 满足要求，仓库没有 `.codegraph/`；审查前工作树干净。最新提交涉及 102 个文件、约 8,086 行新增。
+- [x] `npm run typecheck` 通过；`npm test` 有 7 个新增 Studio 测试失败。测试把 undici `Response` 与 jsdom `Blob` 混用，异常又被宽泛 fallback 吞掉，因此并未真实执行图像成功路径。两个 Hook 的 `failed` 字段目前始终为 `false`。
+- [x] 尺寸模型和 `AlbumPageView` 比例正确，错误在承载层：画布用固定 `zoom=0.75` 且只按宽度算纸张；“适合窗口”把相对因子误写成绝对倍率；预览只限制宽度；裁剪视口把 `absolute inset-[9%]` 与声明 `position:relative;width/height:100%` 的共享类放在同一元素上。
+- [x] 运行时三个目标视口均复现：A4 竖排不能完整显示；预览页高度为可用高度的约 2.46–2.89 倍；裁剪底部固定溢出面板约 45–65px。800×640 还会被同为 `z-50` 的装帧 Sheet 覆盖。
+- [x] “消除后变淡”的确定主因不是 INT8 模型：整图尺度羽化让 1% 笔刷中心 alpha 仅约 0.32–0.35，即 65%–68% 原人物被混回；mask 缩放使用 Lanczos 后又以 `>0.5` 判断 0..255 数据，小遮罩面积实测可扩大约 5 倍；全局 RGB 均值 offset 还会主动把多色/渐变背景拉向平均色。
+- [x] 消除管线另有确定缺陷：RGBA 输入按 3 通道读取、整张 4K 图压到 512、单击涂点不落盘、`ImageBitmap` 和迟到请求泄漏、重复 Apply 始终重新推理；算法修复若不提升独立 erase 缓存版本，已有发白文件会继续被一年 immutable 缓存复用。
+- [x] 图像效果链存在输出不一致：自动美化在旋转/翻转后分析错误区域；编辑器先烘焙几何再做邻域效果，而画布/预览/打印先做效果再 CSS 几何；打印只猜测等待 120ms，可能在美颜/清晰度完成前导出原图；同一效果在多个 `AssetImage` 中重复主线程计算。
+- [x] 新增模态/工作区绕过共享契约：缺少 Dialog title、原始十六进制颜色和重复 `DARK_OUTLINE_BUTTON`、导入 busy 时仍可通过 Esc/X/遮罩关闭、预览快捷键会穿透并移动/删除/复制背后的 Block。
+- [x] 页面栏把 Enter 改成“插入新页”，与按钮选择语义及键盘拖拽冲突；现有 `@dnd-kit/react@0.5.0` 已含 sortable，拖拽排序无需新增依赖。
+- [x] 平台审查还确认三项提交级阻断：导入候选使用可复用全局 ID，交错 picker 可能“看到 A、导入 B”；模型下载使用可变 `main`、直接写最终文件且无摘要校验；clean checkout 打包不下载模型却强制校验模型，macOS universal 也未验证 ONNX Runtime 的双架构 binding。
+
+### 实施计划（用户确认后开始）
+
+- [x] 阶段 1：先把确定缺陷写成红灯。修正无效 `Response/Blob` 测试夹具，并为四规格 contain、连续 fit 幂等、裁剪边界、打印就绪、旋转/翻转自动分析、消除 mask/合成、缓存升级、异步取消、候选会话和页面排序补回归。验证：每项测试在对应修复前能准确失败，成功路径确实执行像素操作。
+- [x] 阶段 2：统一页面与裁剪几何。建立共享 `fitAspectRatioWithin`；编辑画布以 contain 尺寸为基准、zoom 只表达用户倍率并由 `ResizeObserver` 更新；预览复用同一 contain 规则；裁剪使用外层拥有 inset、内层使用共享 viewport；进入独占工作区时关闭窄屏 Sheet。验证：1440×900、1100×720、800×640 × 四种 PageSpec 首帧完整，连续 fit 误差 ≤1px，竖/横/方图裁剪手柄均在面板内。
+- [x] 阶段 3：修正并收敛图片效果管线。用可区分的 ready/fallback/failed 结果替代静默吞错，统一 Blob 生命周期；自动分析接收完整 crop 几何并丢弃陈旧结果；像素效果始终先于几何，编辑与 `ImageBlockView` 使用同一顺序；为打印树建立显式 pending/ready 协议；对相同资源+效果+质量复用有引用计数的派生结果，并以测量决定是否需要 Worker。验证：编辑/画布/缩略图/预览/打印视觉一致，延迟 500ms 的增强不会提前导出，失败可见且不泄漏 URL。
+- [x] 阶段 4：修复人物消除质量与可复现性。输入显式转 sRGB 三通道；mask 用 nearest + `>=128` 二值化；回归 LaMa 的硬内区合成，只在必要时保留 1–2px 内边缘过渡，删除无证据的全局色偏修正；修复单点笔刷与 Bitmap/迟到请求释放；以真实模型 A/B 决定是否再加入 mask ROI 以改善 4K 小目标。新增独立 `ERASE_PIPELINE_VERSION`，命中缓存直接返回并合并并发推理。验证：遮罩外像素不变、小遮罩中心完整使用修复结果、完美模型夹具 MAE 不恶化、相同参数只推理一次、旧缓存不会复用。
+- [x] 阶段 5：建立 minimal 组件系统并迁移本次新增界面。按 shadcn 官方组件契约补齐实际使用的 `Alert`、`Empty`、`Spinner`、`InputGroup` 和 Dialog 变体；建立语义化深色媒体工作区 token 与共享 `MediaWorkspace`；照片编辑/消除共用全屏壳，大图预览和素材全屏复用有焦点/标题/关闭契约的模态；导入 busy 时禁止所有 dismissal。验证：无重复 raw 色值/按钮常量，hover/focus/disabled/error/processing 状态与键盘边界一致。
+- [x] 阶段 6：实现左侧页面拖拽排序与快捷键隔离。页面项使用 `useSortable` 和显式 Grip handle，封面不可拖放，drop end 只 dispatch 一次 `reorder-page`；删除上/下按钮及错误 Enter 插页行为；全局画布快捷键首先排除 Dialog、表单控件和 DnD handle。验证：宽屏纵栏、800px 横栏的指针/键盘排序、自动滚动、取消、undo/redo、保存重开全部正确，选中状态按 page ID 保持。
+- [x] 阶段 7：修复提交内的平台竞态与发布门禁。候选使用 sessionId + 不复用 token + document 绑定，局部扫描后原子发布并统一释放；最近项目依次回退且 StrictMode 去重；模型固定 revision/SHA-256/大小，临时下载校验后原子发布；package workflow 显式准备/验证模型并延迟加载 ONNX Runtime，补齐 universal 双架构检查。验证：交错 picker 不串图、无模型 clean checkout 的预期失败/准备流程明确、错误/半文件不进入产物、arm64/x64 binding 静态与启动检查可证明。
+- [x] 阶段 8：整体质量复核。运行定向单测、`npm run check`、`npm run test:e2e:all`、真实模型质量测试、桌面 package/verify；在 Web 与 Electron 对 1440×900、1100×720、800×640 逐一截图比对，覆盖四页面规格、竖/横/方裁剪、长中文、空态、失败态、拖拽各状态、导入/消除 processing。最后检查最新提交剩余 diff、删除冗余与只由本次改动造成的孤儿代码，并在本节补 Review。
+
+### Review
+
+完成了对 `5104252` 的逻辑、视觉、平台与发布链审查。页面承载层现在共用 contain 几何：编辑器把页面在可用宽高内完整适配，zoom 只表达用户缩放，“适合窗口”幂等；预览和裁剪的外层/内层责任分开，去掉了会在 resize 后短暂裁掉纸张的 width transition。默认 A4 横向规格未被擅改，A4 竖向和其他规格作为几何回归覆盖。
+
+消除后“变淡”的主因确认在应用合成而非 LaMa 模型：大尺度羽化把约 65%–68% 原人物混回，Lanczos 遮罩和错误阈值扩大了区域，全局均色偏移又改写了局部正确色彩。现在输入统一解码为 sRGB，mask 使用 nearest 二值化，模型输入只增加 1 个模型像素安全边界，最终以用户原 mask 硬合成；RGBA 的 alpha 全域逐字节保留。Apply、预览和确认共用同一遮罩快照，处理期锁定入口，单点笔刷、迟到请求、Bitmap/Blob URL 与缓存版本均已收敛。
+
+图片管线改为可观测的 pending/ready/fallback/failed 协议，编辑、画布、预览和打印统一“像素效果→几何”顺序。派生图有进程去重、引用计数与精确 URL 回收；全分辨率增强进入全局 FIFO 单并发队列，不阻塞交互预览。Web/Desktop 打印使用 common 的 cover/crop/rotation 派生几何，不放大小图且不超过整页像素；导出会等待最终图像解码，超时直接中止而不导出旧图。自动增强改为 alpha 加权，透明角不再当黑色背景。
+
+界面补齐了当前产品真实使用的 shadcn-style `Alert`、`Spinner`、`Empty`、`InputGroup`、Dialog 变体与共享 `MediaWorkspace`，照片编辑/消除人物迁入同一套 minimal 语义 token、密度、圆角、焦点和处理态契约。素材全屏是真实焦点陷阱模态，导入期间不能用 Esc/X/遮罩中断；导入事务完成注册后才允许关闭窗口/项目。未为没有实际调用点的 `Separator`/`DropdownMenu` 制造空壳。
+
+页面栏使用 dnd-kit `useSortable` 与独立 Grip，封面完全不注册为 sortable。针对 dnd-kit 乐观 DOM 排序与 React 受控 index 的 dragend 竞态，提交以已呈现的顺序为准；指针拖拽场景连续 8 次稳定通过。取消、undo/redo、保存重开与 800px 横栏键盘边界也有 E2E 覆盖；错误 Enter 插页行为已删除，全局快捷键不再穿透 Dialog/表单/DnD/独占工作区。
+
+平台层同时修复候选会话串项目、最近项目回退、长导入关闭、打印裁剪参数丢失和模型发布门禁。两个 ONNX 模型固定 revision/尺寸/SHA-256，校验通过后原子发布；ORT 延迟加载，macOS universal 和 Windows x64 原生 binding 有静态完整性门禁。
+
+最终证据：Common 90/90、Studio 196/196、Desktop Vitest 80/80（另 3 项环境跳过）和 Node 脚本 13/13；四 workspace typecheck、lint（0 error）、双端 production build、Electron dev smoke、Electron E2E 4/4、Web E2E 2/2全部通过。真实 LaMa/质量测试 2/2 通过，外部真人照片用例因未提供照片跳过。macOS arm64 解包产物、package verify 与打包应用 E2E 2/2 通过；app.asar 2.38 MiB。运行时视觉检查覆盖 1440×900、1100×720、800×640、A4 竖页、150% 缩放、90° 裁剪、预览、大图模态、消除和拖拽。仅保留不阻断的 Prettier 历史 warning、依赖的 Rollup PURE annotation warning 和 Web 主 chunk 504.91 kB warning；Windows 真机与 macOS universal 实际打包仍需对应主机/CI 提供运行证据。

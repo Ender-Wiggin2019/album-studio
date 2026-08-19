@@ -60,7 +60,7 @@ function round(value: number, precision: number): number {
 }
 
 /** 从亮度直方图取分位亮度（0..1，桶内线性插值）。 */
-function percentile(histogram: Uint32Array, total: number, fraction: number): number {
+function percentile(histogram: Float64Array, total: number, fraction: number): number {
   const target = fraction * total
   let accumulated = 0
   for (let bin = 0; bin < HISTOGRAM_BINS; bin += 1) {
@@ -87,28 +87,35 @@ export function analyzeAutoEnhance(
   const count = width * height
   if (count <= 0 || pixels.length < count * 4) return { ...NEUTRAL }
 
-  const histogram = new Uint32Array(HISTOGRAM_BINS)
+  const histogram = new Float64Array(HISTOGRAM_BINS)
   let luminanceSum = 0
   let chromaSum = 0
+  let totalWeight = 0
 
   for (let index = 0; index < count; index += 1) {
     const offset = index * 4
+    const weight = pixels[offset + 3] / 255
+    if (weight <= 0) continue
     const r = pixels[offset] / 255
     const g = pixels[offset + 1] / 255
     const b = pixels[offset + 2] / 255
-    luminanceSum += Y_R * r + Y_G * g + Y_B * b
+    const luminance = Y_R * r + Y_G * g + Y_B * b
+    luminanceSum += luminance * weight
     const max = r > g ? (r > b ? r : b) : g > b ? g : b
     const min = r < g ? (r < b ? r : b) : g < b ? g : b
-    chromaSum += max - min
-    let bin = Math.floor((Y_R * r + Y_G * g + Y_B * b) * HISTOGRAM_BINS)
+    chromaSum += (max - min) * weight
+    let bin = Math.floor(luminance * HISTOGRAM_BINS)
     if (bin >= HISTOGRAM_BINS) bin = HISTOGRAM_BINS - 1
-    histogram[bin] += 1
+    histogram[bin] += weight
+    totalWeight += weight
   }
 
-  const meanY = luminanceSum / count
-  const meanChroma = chromaSum / count
-  const low = percentile(histogram, count, AUTO_ENHANCE_CONSTANTS.percentileLow)
-  const high = percentile(histogram, count, AUTO_ENHANCE_CONSTANTS.percentileHigh)
+  if (totalWeight <= 0) return { ...NEUTRAL }
+
+  const meanY = luminanceSum / totalWeight
+  const meanChroma = chromaSum / totalWeight
+  const low = percentile(histogram, totalWeight, AUTO_ENHANCE_CONSTANTS.percentileLow)
+  const high = percentile(histogram, totalWeight, AUTO_ENHANCE_CONSTANTS.percentileHigh)
   const spread = high - low
 
   const {

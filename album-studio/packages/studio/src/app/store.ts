@@ -239,7 +239,10 @@ export const useStudioStore = create<StudioState>((set, get) => {
     },
     setExclusiveWorkspace: (exclusiveWorkspace) => {
       commitRichTextDraft()
-      set({ exclusiveWorkspace })
+      set({
+        exclusiveWorkspace,
+        ...(exclusiveWorkspace ? { rightPanelSheetOpen: false } : {})
+      })
     },
     setRightPanelTab: (rightPanelTab) => {
       const state = get()

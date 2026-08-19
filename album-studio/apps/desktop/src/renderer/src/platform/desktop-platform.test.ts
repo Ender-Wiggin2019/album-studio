@@ -79,15 +79,23 @@ describe('createDesktopPlatform', () => {
     const api = createApi()
     const platform = createDesktopPlatform(api)
 
+    const crop = {
+      area: { x: 10, y: 0, width: 80, height: 100 },
+      rotationDeg: 90,
+      flipX: false,
+      flipY: true
+    }
     await platform.assets.getSource(document.id, 'asset-1', {
       quality: 'print',
       pageWidthRatio: 0.25,
-      pageHeightRatio: 2
+      pageHeightRatio: 2,
+      crop
     })
 
     expect(api.assets.url).toHaveBeenCalledWith(document.id, 'asset-1', 'print', {
       width: 0.25,
-      height: 1
+      height: 1,
+      crop
     })
   })
 
@@ -102,15 +110,16 @@ describe('createDesktopPlatform', () => {
       source: 'folder'
     })
 
-    await platform.assets.importCandidates(document.id, ['candidate-1'])
+    await platform.assets.importCandidates(document.id, 'session-a', ['candidate-1'])
     expect(api.assets.importCandidates).toHaveBeenCalledWith({
       projectPath: '/private/album-path',
+      sessionId: 'session-a',
       candidateIds: ['candidate-1']
     })
 
-    platform.assets.releaseCandidates(['candidate-1'])
+    await platform.assets.releaseCandidates('session-a')
     expect(api.assets.releaseCandidates).toHaveBeenCalledWith({
-      candidateIds: ['candidate-1']
+      sessionId: 'session-a'
     })
   })
 })

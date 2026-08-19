@@ -1,4 +1,11 @@
-import { IMAGE_PIPELINE_VERSION, pageSpecSizeAtDpi, type PageSpec } from '@album-studio/common'
+import {
+  ERASE_PIPELINE_VERSION,
+  IMAGE_PIPELINE_VERSION,
+  printImageDerivativeSize,
+  printImageTargetSize,
+  type ImageCrop,
+  type PageSpec
+} from '@album-studio/common'
 import { createHash, randomUUID } from 'node:crypto'
 import { lstat, mkdir, open, realpath, rename, unlink, writeFile } from 'node:fs/promises'
 import { dirname, join, posix, resolve, sep } from 'node:path'
@@ -31,7 +38,7 @@ export type ImageVariantRequest =
   | {
       variant: 'print'
       pageSpec: PageSpec
-      usage?: { widthFraction: number; heightFraction: number }
+      usage?: { widthFraction: number; heightFraction: number; crop?: ImageCrop }
     }
   | { variant: 'erased'; usage: { eraseKey: string } }
 
@@ -102,18 +109,6 @@ export function originalRelativePath(
   )
 }
 
-function usageFraction(value: number | undefined): number {
-  const resolved = value ?? 1
-  if (!Number.isFinite(resolved) || resolved <= 0 || resolved > 1) {
-    throw new Error('打印元素尺寸必须是大于 0 且不超过 1 的页面比例。')
-  }
-  return resolved
-}
-
-function printPageTarget(pageSpec: PageSpec): { width: number; height: number } {
-  return pageSpecSizeAtDpi(pageSpec, PRINT_DPI)
-}
-
 export function printTargetForUsage(
   pageSpec: PageSpec,
   usage?: { widthFraction: number; heightFraction: number }
@@ -121,43 +116,47 @@ export function printTargetForUsage(
   width: number
   height: number
 } {
-  const pageTarget = printPageTarget(pageSpec)
-  return {
-    width: Math.max(1, Math.round(pageTarget.width * usageFraction(usage?.widthFraction))),
-    height: Math.max(1, Math.round(pageTarget.height * usageFraction(usage?.heightFraction)))
-  }
+  return printImageTargetSize({ pageSpec, dpi: PRINT_DPI, usage })
 }
 
-function derivativeDescriptor(request: Exclude<ImageVariantRequest, { variant: 'original' }>): {
-  name: string
-  target: { width: number; height: number }
-} {
+function derivativeDescriptor(
+  asset: Pick<StoredImageIdentity, 'width' | 'height'>,
+  request: Exclude<ImageVariantRequest, { variant: 'original' }>
+): { name: string } {
   if (request.variant === 'erased') {
-    return { name: `erased-${request.usage.eraseKey}`, target: { width: 0, height: 0 } }
+    return { name: `erased-${request.usage.eraseKey}` }
   }
-  const target =
-    request.variant === 'thumbnail'
-      ? THUMBNAIL_TARGET
-      : request.variant === 'preview'
-        ? PREVIEW_TARGET
-        : printTargetForUsage(request.pageSpec, request.usage)
+  if (request.variant === 'print') {
+    const output = printImageDerivativeSize({
+      sourceSize: asset,
+      pageSpec: request.pageSpec,
+      dpi: PRINT_DPI,
+      usage: request.usage,
+      crop: request.usage?.crop
+    })
+    return { name: `print-cover-${output.width}x${output.height}` }
+  }
+  const target = request.variant === 'thumbnail' ? THUMBNAIL_TARGET : PREVIEW_TARGET
   return {
-    name: `${request.variant}-${target.width}x${target.height}`,
-    target
+    name: `${request.variant}-${target.width}x${target.height}`
   }
 }
 
 export function derivativeRelativePath(
-  asset: Pick<StoredImageIdentity, 'contentHash'>,
+  asset: Pick<StoredImageIdentity, 'contentHash' | 'width' | 'height'>,
   request: Exclude<ImageVariantRequest, { variant: 'original' }>
 ): string {
   assertContentHash(asset.contentHash)
+  const versionSegments =
+    request.variant === 'erased'
+      ? [IMAGE_PIPELINE_VERSION, `erase-${ERASE_PIPELINE_VERSION}`]
+      : [IMAGE_PIPELINE_VERSION]
   return posix.join(
     'assets',
     'cache',
-    IMAGE_PIPELINE_VERSION,
+    ...versionSegments,
     asset.contentHash,
-    `${derivativeDescriptor(request).name}.webp`
+    `${derivativeDescriptor(asset, request).name}.webp`
   )
 }
 
@@ -310,18 +309,19 @@ function derivativeSize(
   if (request.variant === 'erased') {
     return { width: Math.max(1, asset.width), height: Math.max(1, asset.height) }
   }
-  const descriptor = derivativeDescriptor(request)
+  if (request.variant === 'print') {
+    return printImageDerivativeSize({
+      sourceSize: asset,
+      pageSpec: request.pageSpec,
+      dpi: PRINT_DPI,
+      usage: request.usage,
+      crop: request.usage?.crop
+    })
+  }
   const width = Math.max(1, asset.width)
   const height = Math.max(1, asset.height)
-  const requestedScale =
-    request.variant === 'thumbnail' || request.variant === 'preview'
-      ? Math.min(descriptor.target.width / width, descriptor.target.height / height)
-      : Math.max(descriptor.target.width / width, descriptor.target.height / height)
-  const maximumPrintTarget = request.variant === 'print' ? printPageTarget(request.pageSpec) : null
-  const pixelLimitScale = maximumPrintTarget
-    ? Math.sqrt((maximumPrintTarget.width * maximumPrintTarget.height) / (width * height))
-    : 1
-  const scale = Math.min(1, requestedScale, pixelLimitScale)
+  const target = request.variant === 'thumbnail' ? THUMBNAIL_TARGET : PREVIEW_TARGET
+  const scale = Math.min(1, target.width / width, target.height / height)
   return {
     width: Math.max(1, Math.round(width * scale)),
     height: Math.max(1, Math.round(height * scale))
@@ -451,7 +451,7 @@ export class ImageStore {
 
       const temporaryPath = join(
         cacheDirectory,
-        `.${derivativeDescriptor(request).name}.${process.pid}.${randomUUID()}.tmp`
+        `.${derivativeDescriptor(asset, request).name}.${process.pid}.${randomUUID()}.tmp`
       )
       try {
         const output = derivativeSize(asset, request)
@@ -493,14 +493,14 @@ export class ImageStore {
   }
 
   /**
-   * 写入消除结果派生图（由推理服务生成，与原图同像素尺寸）。
-   * 走与其它派生图相同的安全目录、原子发布与 fsync 语义。
+   * 命中已有消除缓存时不运行推理；同一键的并发请求共用一次生成。
+   * 新结果仍走安全目录、原子发布与 fsync 语义。
    */
-  async writeErased(
+  async getOrCreateErased(
     projectRoot: string,
     asset: StoredImageIdentity,
     eraseKey: string,
-    image: Buffer
+    createImage: () => Promise<Buffer>
   ): Promise<string> {
     assertEraseKey(eraseKey)
     const canonicalRoot = await realpath(projectRoot)
@@ -510,32 +510,56 @@ export class ImageStore {
     })
     const finalPath = toFileSystemPath(canonicalRoot, relativePath)
     if (!isPathInside(canonicalRoot, finalPath)) throw new Error('素材路径越过项目边界。')
-    const cacheDirectory = await ensureSafeDirectory(canonicalRoot, [
-      'assets',
-      'cache',
-      IMAGE_PIPELINE_VERSION,
-      asset.contentHash
-    ])
-    const temporaryPath = join(
-      cacheDirectory,
-      `.erased-${eraseKey}.${process.pid}.${randomUUID()}.tmp`
-    )
-    try {
-      await writeFile(temporaryPath, image)
-      const temporary = await open(temporaryPath, 'r+')
-      try {
-        await temporary.sync()
-      } finally {
-        await temporary.close()
-      }
-      await publishTemporaryFile(temporaryPath, finalPath)
-    } catch (error) {
-      await unlink(temporaryPath).catch(() => undefined)
-      throw error
+    if (await existingRegularFile(finalPath)) {
+      const cached = await realpath(finalPath)
+      if (!isPathInside(canonicalRoot, cached)) throw new Error('素材缓存越过项目边界。')
+      return cached
     }
-    const cached = await realpath(finalPath)
-    if (!isPathInside(canonicalRoot, cached)) throw new Error('素材缓存越过项目边界。')
-    return cached
+
+    const existing = this.inFlight.get(finalPath)
+    if (existing) return existing
+
+    const operation = this.limiter.run(async () => {
+      const cacheDirectory = await ensureSafeDirectory(canonicalRoot, [
+        'assets',
+        'cache',
+        IMAGE_PIPELINE_VERSION,
+        `erase-${ERASE_PIPELINE_VERSION}`,
+        asset.contentHash
+      ])
+      if (await existingRegularFile(finalPath)) {
+        const cached = await realpath(finalPath)
+        if (!isPathInside(canonicalRoot, cached)) throw new Error('素材缓存越过项目边界。')
+        return cached
+      }
+
+      const temporaryPath = join(
+        cacheDirectory,
+        `.erased-${eraseKey}.${process.pid}.${randomUUID()}.tmp`
+      )
+      try {
+        await writeFile(temporaryPath, await createImage())
+        const temporary = await open(temporaryPath, 'r+')
+        try {
+          await temporary.sync()
+        } finally {
+          await temporary.close()
+        }
+        await publishTemporaryFile(temporaryPath, finalPath)
+      } catch (error) {
+        await unlink(temporaryPath).catch(() => undefined)
+        throw error
+      }
+      const cached = await realpath(finalPath)
+      if (!isPathInside(canonicalRoot, cached)) throw new Error('素材缓存越过项目边界。')
+      return cached
+    })
+    this.inFlight.set(finalPath, operation)
+    try {
+      return await operation
+    } finally {
+      if (this.inFlight.get(finalPath) === operation) this.inFlight.delete(finalPath)
+    }
   }
 }
 

@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process'
 import { access, mkdtemp, readdir, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { dirname, join, resolve } from 'node:path'
+import { join, resolve } from 'node:path'
 import {
   assertNoRendererStartupErrors,
   captureProcess,
@@ -9,6 +9,7 @@ import {
   reservePort,
   terminateProcessTree
 } from './smoke-runtime.mjs'
+import { assertNativeImagePipeline, packagedResourcesDirectory } from './package-integrity.mjs'
 
 const totalTimeoutMs = 30_000
 const maxAppAsarBytes = 64 * 1024 * 1024
@@ -58,47 +59,6 @@ async function findPackagedExecutable() {
   }
 
   throw new Error(`当前平台没有找到可启动的解包产物：${process.platform}`)
-}
-
-async function assertNativeImagePipeline(executable) {
-  const resourcesDirectory = packagedResourcesDirectory(executable)
-  const unpackedModules = join(resourcesDirectory, 'app.asar.unpacked', 'node_modules')
-  const expectedPackages = ['sharp']
-
-  if (process.platform === 'win32') {
-    expectedPackages.push('@img/sharp-win32-x64')
-  } else if (process.platform === 'darwin') {
-    const architectures = executable.includes('mac-universal') ? ['arm64', 'x64'] : [process.arch]
-    for (const architecture of architectures) {
-      expectedPackages.push(`@img/sharp-darwin-${architecture}`)
-      expectedPackages.push(`@img/sharp-libvips-darwin-${architecture}`)
-    }
-  }
-
-  for (const packageName of expectedPackages) {
-    const packagePath = join(unpackedModules, ...packageName.split('/'))
-    try {
-      await access(packagePath)
-    } catch {
-      throw new Error(`打包产物缺少原生图片依赖：${packagePath}`)
-    }
-  }
-
-  // 消除人物模型的 extraResources 目录（resources/models）
-  for (const modelName of ['lama_512_int8.onnx', 'selfie_segmentation.onnx']) {
-    const modelPath = join(resourcesDirectory, 'models', modelName)
-    try {
-      await access(modelPath)
-    } catch {
-      throw new Error(`打包产物缺少消除人物模型：${modelPath}`)
-    }
-  }
-}
-
-function packagedResourcesDirectory(executable) {
-  return process.platform === 'darwin'
-    ? resolve(dirname(executable), '..', 'Resources')
-    : join(dirname(executable), 'resources')
 }
 
 async function assertLeanAppAsar(executable) {

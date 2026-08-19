@@ -7,10 +7,12 @@ import {
   Redo2Icon,
   Undo2Icon
 } from 'lucide-react'
-import { lazy, Suspense, useEffect, useState } from 'react'
+import type { AlbumDocument } from '@album-studio/common'
+import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { useStudioPlatform } from '@/app/platform/use-studio-platform'
 import { useStudioStore } from '@/app/store'
+import { waitForAssetImports } from '@/app/pending-asset-imports'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -23,8 +25,10 @@ import {
 import { Progress } from '@/components/ui/progress'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { BlockPlacementDragDropProvider } from '@/features/block-placement/drag-drop-provider'
-import { PrintBook } from '@/features/canvas/album-page-view'
+import { PrintBook, type PrintBookReadyResult } from '@/features/canvas/album-page-view'
 import { PreviewWorkspace } from '@/features/preview/preview-workspace'
+import { shouldIgnoreStudioShortcut } from './studio-keyboard'
+import { waitForPrintReadiness } from './print-readiness'
 
 const EditorWorkspace = lazy(async () => ({
   default: (await import('@/features/canvas/editor-workspace')).EditorWorkspace
@@ -87,24 +91,31 @@ export function StudioWorkspace(): React.JSX.Element {
   const [exporting, setExporting] = useState(false)
   const [exportProgress, setExportProgress] = useState(0)
   const [exportMessage, setExportMessage] = useState('准备页面资源…')
+  const [printDocument, setPrintDocument] = useState<AlbumDocument | null>(null)
+  const printReadyRef = useRef<((result: PrintBookReadyResult) => void) | null>(null)
   const [returning, setReturning] = useState(false)
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
-      const target = event.target as HTMLElement | null
-      if (target?.closest('input, textarea, [contenteditable=true]')) return
+      const state = useStudioStore.getState()
+      if (
+        shouldIgnoreStudioShortcut({
+          defaultPrevented: event.defaultPrevented,
+          isComposing: event.isComposing,
+          target: event.target,
+          exclusiveWorkspace: state.exclusiveWorkspace
+        })
+      ) {
+        return
+      }
       const commandKey = event.metaKey || event.ctrlKey
       if (commandKey && event.key.toLowerCase() === 'z') {
         event.preventDefault()
-        const state = useStudioStore.getState()
         if (event.shiftKey) state.redo()
         else state.undo()
         return
       }
 
-      const state = useStudioStore.getState()
-      // 照片编辑/消除人物等独占工作区打开时，画布快捷键不应作用于背后的编辑器
-      if (state.exclusiveWorkspace) return
       const { document: currentDocument, selectedPageId, selectedBlockId } = state
       if (!currentDocument || !selectedPageId || !selectedBlockId) return
       const page = currentDocument.pages.find((candidate) => candidate.id === selectedPageId)
@@ -175,6 +186,7 @@ export function StudioWorkspace(): React.JSX.Element {
     if (returning) return
     setReturning(true)
     try {
+      await waitForAssetImports()
       await flush()
       closeDocument()
     } catch (error) {
@@ -194,9 +206,23 @@ export function StudioWorkspace(): React.JSX.Element {
       await flush()
       setExportProgress(55)
       setExportMessage('正在等待图片并生成页面…')
-      await new Promise((resolve) => window.setTimeout(resolve, 120))
       const current = useStudioStore.getState().document
       if (!current) return
+      const readiness = new Promise<PrintBookReadyResult>((resolve) => {
+        printReadyRef.current = resolve
+      })
+      setPrintDocument(current)
+      const prepared = await waitForPrintReadiness(readiness)
+      printReadyRef.current = null
+      if (prepared.timedOut) {
+        throw new Error('部分图片处理超时，请重试导出。')
+      }
+      setExportProgress(70)
+      if (prepared.fallbackCount > 0) {
+        setExportMessage(`${prepared.fallbackCount} 张图片已回退到原图或占位，正在导出…`)
+      } else {
+        setExportMessage('图片已就绪，正在生成 PDF…')
+      }
       const result = await platform.export.pdf(current)
       if (!result) {
         setExportOpen(false)
@@ -211,15 +237,21 @@ export function StudioWorkspace(): React.JSX.Element {
       setExportProgress(0)
       setExportMessage(error instanceof Error ? error.message : '导出失败')
     } finally {
+      printReadyRef.current = null
+      setPrintDocument(null)
       setExporting(false)
     }
   }
 
-  if (exclusiveWorkspace === 'erase-people') {
+  if (exclusiveWorkspace === 'erase-people' || exclusiveWorkspace === 'image-edit') {
     return (
       <div className="app-shell flex h-dvh flex-col overflow-hidden">
         <Suspense fallback={<WorkspaceLoading />}>
-          <ErasePeopleWorkspace />
+          {exclusiveWorkspace === 'erase-people' ? (
+            <ErasePeopleWorkspace />
+          ) : (
+            <PhotoEditWorkspace />
+          )}
         </Suspense>
       </div>
     )
@@ -273,16 +305,38 @@ export function StudioWorkspace(): React.JSX.Element {
                 <Redo2Icon />
               </Button>
             </div>
-            <Button variant="outline" size="sm" onClick={() => setExclusiveWorkspace('preview')}>
-              <EyeIcon data-icon="inline-start" />
-              <span className="action-label">预览整册</span>
-            </Button>
-            <Button size="sm" onClick={() => void exportPdf()} disabled={exporting}>
-              <FileDownIcon data-icon="inline-start" />
-              <span className="action-label">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  aria-label="预览整册"
+                  onClick={() => setExclusiveWorkspace('preview')}
+                >
+                  <EyeIcon data-icon="inline-start" />
+                  <span className="action-label">预览整册</span>
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>预览整册</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  size="sm"
+                  aria-label={platform.kind === 'desktop' ? '导出 PDF' : '打印 / PDF'}
+                  onClick={() => void exportPdf()}
+                  disabled={exporting}
+                >
+                  <FileDownIcon data-icon="inline-start" />
+                  <span className="action-label">
+                    {platform.kind === 'desktop' ? '导出 PDF' : '打印 / PDF'}
+                  </span>
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
                 {platform.kind === 'desktop' ? '导出 PDF' : '打印 / PDF'}
-              </span>
-            </Button>
+              </TooltipContent>
+            </Tooltip>
           </div>
         </header>
         {exclusiveWorkspace === 'preview' ? (
@@ -295,20 +349,9 @@ export function StudioWorkspace(): React.JSX.Element {
           </Suspense>
         )}
       </div>
-      {exclusiveWorkspace === 'image-edit' ? (
-        <Dialog open onOpenChange={(open) => !open && setExclusiveWorkspace(null)}>
-          <DialogContent
-            showCloseButton={false}
-            aria-label="照片编辑"
-            className="h-[min(88dvh,900px)] max-h-[min(88dvh,900px)] w-[min(1200px,calc(100vw-2rem))] max-w-none grid-rows-[minmax(0,1fr)] gap-0 overflow-hidden rounded-xl p-0"
-          >
-            <Suspense fallback={<WorkspaceLoading />}>
-              <PhotoEditWorkspace />
-            </Suspense>
-          </DialogContent>
-        </Dialog>
+      {printDocument ? (
+        <PrintBook document={printDocument} onReady={(result) => printReadyRef.current?.(result)} />
       ) : null}
-      {exportOpen ? <PrintBook document={document} /> : null}
       <Dialog open={exportOpen} onOpenChange={(open) => !exporting && setExportOpen(open)}>
         <DialogContent showCloseButton={!exporting}>
           <DialogHeader>

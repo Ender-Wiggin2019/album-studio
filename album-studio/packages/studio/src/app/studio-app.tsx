@@ -5,6 +5,7 @@ import { Toaster } from '@/components/ui/sonner'
 import { resumeLastProject } from '@/app/platform/resume-last-project'
 import { useStudioPlatform } from '@/app/platform/use-studio-platform'
 import { useStudioStore } from '@/app/store'
+import { hasPendingAssetImports, waitForAssetImports } from '@/app/pending-asset-imports'
 import { ProjectsHome } from '@/pages/projects/projects-home'
 
 const StudioWorkspace = lazy(async () => ({
@@ -45,6 +46,7 @@ export function StudioApp(): React.JSX.Element {
             if (globalThis.document.activeElement instanceof HTMLElement) {
               globalThis.document.activeElement.blur()
             }
+            await waitForAssetImports()
             await useStudioStore.getState().flush()
             await platform.lifecycle.closeReady({ ok: true })
           } catch (error) {
@@ -56,6 +58,16 @@ export function StudioApp(): React.JSX.Element {
       }),
     [platform]
   )
+
+  useEffect(() => {
+    const preventUnloadDuringImport = (event: BeforeUnloadEvent): void => {
+      if (!hasPendingAssetImports()) return
+      event.preventDefault()
+      event.returnValue = ''
+    }
+    window.addEventListener('beforeunload', preventUnloadDuringImport)
+    return () => window.removeEventListener('beforeunload', preventUnloadDuringImport)
+  }, [])
 
   return (
     <TooltipProvider delayDuration={350}>

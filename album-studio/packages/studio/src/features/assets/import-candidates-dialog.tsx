@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { EyeIcon } from 'lucide-react'
 import type { ImportCandidate } from '@/app/platform/studio-platform'
+import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import {
@@ -13,6 +14,7 @@ import {
   DialogTitle
 } from '@/components/ui/dialog'
 import { cn } from '@/shared/lib/cn'
+import { Spinner } from '@/components/ui/spinner'
 import { PhotoPreviewOverlay, type PhotoPreviewItem } from './photo-preview-overlay'
 
 function formatBytes(bytes: number): string {
@@ -24,18 +26,20 @@ function formatBytes(bytes: number): string {
 function CandidateCard({
   candidate,
   selected,
+  disabled,
   onToggle,
   onView
 }: {
   candidate: ImportCandidate
   selected: boolean
+  disabled: boolean
   onToggle: () => void
   onView: () => void
 }): React.JSX.Element {
   return (
     <div
       className={cn(
-        'group relative min-w-0 overflow-hidden rounded-lg border bg-card shadow-xs transition-colors hover:border-primary/45',
+        'group relative min-w-0 overflow-hidden rounded-md border bg-card transition-colors hover:border-primary/45',
         selected && 'border-primary ring-1 ring-primary/30'
       )}
       data-selected={selected || undefined}
@@ -43,9 +47,10 @@ function CandidateCard({
       <button
         type="button"
         onClick={onToggle}
+        disabled={disabled}
         aria-pressed={selected}
         aria-label={`选择 ${candidate.fileName}`}
-        className="w-full cursor-pointer text-left outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+        className="w-full cursor-pointer text-left outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-70"
       >
         <div className="relative aspect-square overflow-hidden bg-muted">
           {candidate.previewUrl ? (
@@ -78,6 +83,7 @@ function CandidateCard({
         <Checkbox
           checked={selected}
           onCheckedChange={onToggle}
+          disabled={disabled}
           aria-label={`选择 ${candidate.fileName}`}
           title="勾选后导入"
         />
@@ -85,9 +91,10 @@ function CandidateCard({
       <button
         type="button"
         onClick={onView}
+        disabled={disabled}
         aria-label={`查看大图 ${candidate.fileName}`}
         title="查看大图"
-        className="absolute right-1.5 top-1.5 cursor-pointer rounded bg-background/85 p-1 text-muted-foreground shadow-xs transition-colors hover:bg-background hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+        className="absolute right-1.5 top-1.5 cursor-pointer rounded bg-background/85 p-1 text-muted-foreground shadow-xs transition-colors hover:bg-background hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-60"
       >
         <EyeIcon className="size-3.5" />
       </button>
@@ -99,12 +106,14 @@ export function ImportCandidatesDialog({
   open,
   candidates,
   importing,
+  error,
   onConfirm,
   onClose
 }: {
   open: boolean
   candidates: ImportCandidate[]
   importing: boolean
+  error: string | null
   onConfirm: (candidateIds: string[]) => void
   onClose: () => void
 }): React.JSX.Element {
@@ -124,6 +133,7 @@ export function ImportCandidatesDialog({
     candidates.length > 0 && candidates.every((candidate) => selectedIds.has(candidate.id))
 
   const toggleCandidate = (id: string): void => {
+    if (importing) return
     setSelectedIds((current) => {
       const next = new Set(current)
       if (next.has(id)) {
@@ -136,6 +146,7 @@ export function ImportCandidatesDialog({
   }
 
   const toggleAll = (): void => {
+    if (importing) return
     setSelectedIds(
       allVisibleSelected ? new Set() : new Set(candidates.map((candidate) => candidate.id))
     )
@@ -154,8 +165,20 @@ export function ImportCandidatesDialog({
   }))
 
   return (
-    <Dialog open={open} onOpenChange={(next) => (!next ? onClose() : undefined)}>
-      <DialogContent className="max-w-2xl">
+    <Dialog open={open} onOpenChange={(next) => (!next && !importing ? onClose() : undefined)}>
+      <DialogContent
+        className="max-w-2xl"
+        showCloseButton={!importing}
+        onEscapeKeyDown={(event) => {
+          if (importing) event.preventDefault()
+        }}
+        onPointerDownOutside={(event) => {
+          if (importing) event.preventDefault()
+        }}
+        onInteractOutside={(event) => {
+          if (importing) event.preventDefault()
+        }}
+      >
         <DialogHeader>
           <DialogTitle>选择要导入的照片</DialogTitle>
           <DialogDescription>
@@ -164,8 +187,17 @@ export function ImportCandidatesDialog({
         </DialogHeader>
         <DialogBody>
           <div className="mb-3 flex items-center justify-between">
-            <label className="flex cursor-pointer items-center gap-1.5 text-xs">
-              <Checkbox checked={allVisibleSelected} onCheckedChange={toggleAll} />
+            <label
+              className={cn(
+                'flex cursor-pointer items-center gap-1.5 text-xs',
+                importing && 'cursor-not-allowed opacity-60'
+              )}
+            >
+              <Checkbox
+                checked={allVisibleSelected}
+                onCheckedChange={toggleAll}
+                disabled={importing}
+              />
               全选 / 全不选
             </label>
             <span className="text-[11px] text-muted-foreground">
@@ -178,6 +210,7 @@ export function ImportCandidatesDialog({
                 key={candidate.id}
                 candidate={candidate}
                 selected={selectedIds.has(candidate.id)}
+                disabled={importing}
                 onToggle={() => toggleCandidate(candidate.id)}
                 onView={() => setPreviewIndex(candidateIndex)}
               />
@@ -185,6 +218,11 @@ export function ImportCandidatesDialog({
           </div>
         </DialogBody>
         <DialogFooter>
+          {error ? (
+            <Alert variant="destructive" className="mr-auto sm:max-w-sm">
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          ) : null}
           <Button variant="ghost" onClick={onClose} disabled={importing}>
             取消
           </Button>
@@ -192,7 +230,14 @@ export function ImportCandidatesDialog({
             onClick={() => onConfirm(Array.from(selectedIds))}
             disabled={selectedIds.size === 0 || importing}
           >
-            {importing ? '正在导入…' : `导入所选 ${selectedIds.size} 张`}
+            {importing ? (
+              <>
+                <Spinner aria-hidden="true" />
+                正在导入…
+              </>
+            ) : (
+              `导入所选 ${selectedIds.size} 张`
+            )}
           </Button>
         </DialogFooter>
       </DialogContent>

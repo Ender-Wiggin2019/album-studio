@@ -81,9 +81,9 @@ describe('ProjectRepository asset resolution', () => {
     const originalPath = await reopenedRepository.resolveAsset(reopened.document.id, asset.id, {
       variant: 'original'
     })
-    expect(
-      originalPath.endsWith(join('assets', 'original', `${stored.contentHash}.png`))
-    ).toBe(true)
+    expect(originalPath.endsWith(join('assets', 'original', `${stored.contentHash}.png`))).toBe(
+      true
+    )
 
     const previewPath = await reopenedRepository.resolveAsset(reopened.document.id, asset.id, {
       variant: 'preview'
@@ -99,7 +99,7 @@ describe('ProjectRepository asset resolution', () => {
       variant: 'print',
       usage: { widthFraction: 0.25, heightFraction: 0.5 }
     })
-    expect(printPath).toMatch(/print-877x1240\.webp$/)
+    expect(printPath).toMatch(/print-cover-320x200\.webp$/)
   })
 
   it('reports old manifests separately from damaged v2 projects', async () => {

@@ -13,10 +13,10 @@ import {
 import { tmpdir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
 import sharp from 'sharp'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 // Windows 上 libvips 会缓存已打开文件的句柄，导致 metadata 读取后的 unlink 报 EBUSY；测试内禁用缓存以释放句柄。
 sharp.cache(false)
-import type { PageSpec } from '@album-studio/common'
+import { ERASE_PIPELINE_VERSION, type PageSpec } from '@album-studio/common'
 import {
   derivativeRelativePath,
   ImageStore,
@@ -194,7 +194,7 @@ describe('ImageStore', () => {
       width: 351,
       height: 263
     })
-    expect(basename(printPath)).toBe('print-351x248.webp')
+    expect(basename(printPath)).toBe('print-cover-351x263.webp')
   })
 
   it('stores erased results and only serves them read-only', async () => {
@@ -207,9 +207,9 @@ describe('ImageStore', () => {
     const stored = await store.importFile(projectRoot, sourcePath)
     const asset = identity(stored)
     const eraseKey = 'abc123def456'
-    expect(
-      derivativeRelativePath(asset, { variant: 'erased', usage: { eraseKey } })
-    ).toBe(`assets/cache/1/${asset.contentHash}/erased-${eraseKey}.webp`)
+    expect(derivativeRelativePath(asset, { variant: 'erased', usage: { eraseKey } })).toBe(
+      `assets/cache/1/erase-${ERASE_PIPELINE_VERSION}/${asset.contentHash}/erased-${eraseKey}.webp`
+    )
 
     const webp = await sharp({
       create: {
@@ -221,8 +221,29 @@ describe('ImageStore', () => {
     })
       .webp()
       .toBuffer()
-    const written = await store.writeErased(projectRoot, asset, eraseKey, webp)
+    const createErased = vi.fn(async () => webp)
+    const written = await store.getOrCreateErased(projectRoot, asset, eraseKey, createErased)
+    const cached = await store.getOrCreateErased(projectRoot, asset, eraseKey, createErased)
     expect(basename(written)).toBe(`erased-${eraseKey}.webp`)
+    expect(cached).toBe(written)
+    expect(createErased).toHaveBeenCalledTimes(1)
+
+    const concurrentKey = 'concurrent123'
+    let releaseCreate!: () => void
+    const createConcurrent = vi.fn(
+      () =>
+        new Promise<Buffer>((resolve) => {
+          releaseCreate = () => resolve(webp)
+        })
+    )
+    const concurrentWrites = Array.from({ length: 6 }, () =>
+      store.getOrCreateErased(projectRoot, asset, concurrentKey, createConcurrent)
+    )
+    await vi.waitFor(() => expect(createConcurrent).toHaveBeenCalledTimes(1))
+    releaseCreate()
+    expect(new Set(await Promise.all(concurrentWrites)).size).toBe(1)
+    expect(createConcurrent).toHaveBeenCalledTimes(1)
+
     await expect(
       store.resolve(projectRoot, asset, { variant: 'erased', usage: { eraseKey } })
     ).resolves.toBe(written)
@@ -231,16 +252,20 @@ describe('ImageStore', () => {
     await expect(
       store.resolve(projectRoot, asset, { variant: 'erased', usage: { eraseKey: 'zzzz9999' } })
     ).rejects.toThrow(/缓存缺失/)
-    await expect(store.writeErased(projectRoot, asset, 'bad/key!', webp)).rejects.toThrow(/键无效/)
-    await expect(store.writeErased(projectRoot, asset, '../escape', webp)).rejects.toThrow(/键无效/)
+    await expect(
+      store.getOrCreateErased(projectRoot, asset, 'bad/key!', createErased)
+    ).rejects.toThrow(/键无效/)
+    await expect(
+      store.getOrCreateErased(projectRoot, asset, '../escape', createErased)
+    ).rejects.toThrow(/键无效/)
   })
 
   it('derives safe paths only from hashes, MIME types, pipeline version, and variants', () => {
     const asset = {
       contentHash: 'a'.repeat(64),
       mimeType: 'image/jpeg' as const,
-      width: 100,
-      height: 100
+      width: 5000,
+      height: 4000
     }
 
     expect(originalRelativePath(asset)).toBe(`assets/original/${'a'.repeat(64)}.jpg`)

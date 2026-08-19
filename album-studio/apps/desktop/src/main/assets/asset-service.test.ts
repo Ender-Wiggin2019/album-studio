@@ -116,20 +116,24 @@ describe('AssetService', () => {
       filePaths: [sourcePath]
     })
 
-    const candidates = await service.chooseCandidates(
-      {} as never,
-      { projectPath: projectRoot, source: 'files' }
-    )
+    const session = await service.chooseCandidates({} as never, {
+      projectPath: projectRoot,
+      source: 'files'
+    })
+    if (!session) throw new Error('测试夹具未创建候选会话')
 
-    expect(candidates).toHaveLength(1)
-    expect(candidates?.[0]).toMatchObject({
-      id: 'candidate-1',
+    expect(session.id).toEqual(expect.any(String))
+    expect(session.candidates).toHaveLength(1)
+    expect(session.candidates[0]).toMatchObject({
+      id: expect.any(String),
       fileName: 'photo.png',
       width: 96,
       height: 64,
       byteSize: expect.any(Number)
     })
-    expect(candidates?.[0].previewUrl).toMatch(/^album-candidate:\/\/preview\/candidate-1\?v=/)
+    expect(session.candidates[0].previewUrl).toBe(
+      `album-candidate://preview/${session.id}/${session.candidates[0].id}?v=1`
+    )
     await expect(readdir(join(projectRoot, 'assets', 'original'))).rejects.toMatchObject({
       code: 'ENOENT'
     })
@@ -146,18 +150,23 @@ describe('AssetService', () => {
       filePaths: [sourcePath, secondSource]
     })
 
-    await service.chooseCandidates({} as never, {
+    const session = await service.chooseCandidates({} as never, {
       projectPath: projectRoot,
       source: 'files'
     })
+    if (!session) throw new Error('测试夹具未创建候选会话')
+    const firstCandidateId = session.candidates[0]?.id
+    const secondCandidateId = session.candidates[1]?.id
+    if (!firstCandidateId || !secondCandidateId) throw new Error('测试夹具缺少候选照片')
     const result = await service.importCandidates({
       projectPath: projectRoot,
-      candidateIds: ['candidate-1']
+      sessionId: session.id,
+      candidateIds: [firstCandidateId]
     })
 
     expect(result?.assets).toHaveLength(1)
     expect(result?.assets[0].fileName).toBe('photo.png')
-    expect(await service.resolveCandidatePreview('candidate-2')).toBeNull()
+    expect(await service.resolveCandidatePreview(session.id, secondCandidateId)).toBeNull()
   })
 
   it('resolves and caches candidate previews, then clears them on release', async () => {
@@ -169,19 +178,62 @@ describe('AssetService', () => {
       filePaths: [sourcePath]
     })
 
-    await service.chooseCandidates({} as never, {
+    const session = await service.chooseCandidates({} as never, {
       projectPath: projectRoot,
       source: 'files'
     })
+    if (!session) throw new Error('测试夹具未创建候选会话')
+    const candidateId = session.candidates[0]?.id
+    if (!candidateId) throw new Error('测试夹具缺少候选照片')
 
-    const first = await service.resolveCandidatePreview('candidate-1')
-    const second = await service.resolveCandidatePreview('candidate-1')
+    const first = await service.resolveCandidatePreview(session.id, candidateId)
+    const second = await service.resolveCandidatePreview(session.id, candidateId)
     expect(first?.contentType).toBe('image/webp')
     expect(first?.data.length).toBeGreaterThan(0)
     expect(second).toEqual(first)
 
-    await service.releaseCandidates({ candidateIds: ['candidate-1'] })
-    expect(await service.resolveCandidatePreview('candidate-1')).toBeNull()
+    await service.releaseCandidates({ sessionId: session.id })
+    expect(await service.resolveCandidatePreview(session.id, candidateId)).toBeNull()
+  })
+
+  it('keeps candidate sessions isolated and binds import to the project that opened them', async () => {
+    const { root, projectRoot, sourcePath, userData } = await fixture()
+    const secondSource = join(root, 'second.png')
+    await copyFile(sourcePath, secondSource)
+    const { projects } = projectStub(projectRoot)
+    const service = makeService(projects, userData)
+    vi.mocked(dialog.showOpenDialog)
+      .mockResolvedValueOnce({ canceled: false, filePaths: [sourcePath] })
+      .mockResolvedValueOnce({ canceled: false, filePaths: [secondSource] })
+
+    const first = await service.chooseCandidates({} as never, {
+      projectPath: projectRoot,
+      source: 'files'
+    })
+    const second = await service.chooseCandidates({} as never, {
+      projectPath: projectRoot,
+      source: 'files'
+    })
+    if (!first || !second) throw new Error('测试夹具未创建候选会话')
+    const firstCandidateId = first.candidates[0]?.id
+    const secondCandidateId = second.candidates[0]?.id
+    if (!firstCandidateId || !secondCandidateId) throw new Error('测试夹具缺少候选照片')
+
+    expect(first.id).not.toBe(second.id)
+    expect(firstCandidateId).not.toBe(secondCandidateId)
+    expect(await service.resolveCandidatePreview(first.id, firstCandidateId)).not.toBeNull()
+    expect(await service.resolveCandidatePreview(second.id, secondCandidateId)).not.toBeNull()
+    await expect(
+      service.importCandidates({
+        projectPath: join(root, 'another-project'),
+        sessionId: first.id,
+        candidateIds: [firstCandidateId]
+      })
+    ).rejects.toThrow('不属于当前项目')
+
+    await service.releaseCandidates({ sessionId: second.id })
+    expect(await service.resolveCandidatePreview(first.id, firstCandidateId)).not.toBeNull()
+    expect(await service.resolveCandidatePreview(second.id, secondCandidateId)).toBeNull()
   })
 
   it('defaults the pick dialog to the folder used by the previous import', async () => {

@@ -1,11 +1,13 @@
 import { app } from 'electron'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
-import * as ort from 'onnxruntime-node'
+import type * as Ort from 'onnxruntime-node'
 import sharp from 'sharp'
 
 const SEGMENT_INPUT = 256
 const LAMA_INPUT = 512
+// 图像缩小插值会在对象轮廓外留下颜色采样；1px 是 512 模型输入中能隔离该污染的最小边界。
+const LAMA_MASK_MARGIN = 1
 
 export const ERASE_MODEL_DIR = 'models'
 
@@ -26,8 +28,9 @@ export type PersonMask = {
 
 export class EraseInferenceService {
   private readonly modelDirectoryPath: string
-  private segmentation: Promise<ort.InferenceSession> | null = null
-  private lama: Promise<ort.InferenceSession> | null = null
+  private runtimePromise: Promise<typeof import('onnxruntime-node')> | null = null
+  private segmentation: Promise<Ort.InferenceSession> | null = null
+  private lama: Promise<Ort.InferenceSession> | null = null
 
   constructor(modelDirectoryPath?: string) {
     this.modelDirectoryPath = modelDirectoryPath ?? resolveModelDirectory()
@@ -43,12 +46,23 @@ export class EraseInferenceService {
     return candidate
   }
 
-  private segmentationSession(): Promise<ort.InferenceSession> {
+  private runtime(): Promise<typeof import('onnxruntime-node')> {
+    this.runtimePromise ??= import('onnxruntime-node').catch((error: unknown) => {
+      throw new Error('当前安装包无法加载与系统架构匹配的 ONNX Runtime。请重新安装应用。', {
+        cause: error
+      })
+    })
+    return this.runtimePromise
+  }
+
+  private async segmentationSession(): Promise<Ort.InferenceSession> {
+    const ort = await this.runtime()
     this.segmentation ??= ort.InferenceSession.create(this.modelPath('selfie_segmentation.onnx'))
     return this.segmentation
   }
 
-  private lamaSession(): Promise<ort.InferenceSession> {
+  private async lamaSession(): Promise<Ort.InferenceSession> {
+    const ort = await this.runtime()
     this.lama ??= ort.InferenceSession.create(this.modelPath('lama_512_int8.onnx'))
     return this.lama
   }
@@ -60,11 +74,7 @@ export class EraseInferenceService {
     const height = metadata.autoOrient.height ?? 0
     if (width < 1 || height < 1) throw new Error('图片尺寸无效。')
 
-    const { data } = await sharp(imagePath)
-      .autoOrient()
-      .resize(SEGMENT_INPUT, SEGMENT_INPUT, { fit: 'fill' })
-      .raw()
-      .toBuffer({ resolveWithObject: true })
+    const data = await decodeSrgb(imagePath, SEGMENT_INPUT, SEGMENT_INPUT)
 
     const input = new Uint8Array(SEGMENT_INPUT * SEGMENT_INPUT * 3)
     for (let i = 0; i < SEGMENT_INPUT * SEGMENT_INPUT; i++) {
@@ -72,27 +82,28 @@ export class EraseInferenceService {
       input[i * 3 + 1] = data[i * 3 + 1]
       input[i * 3 + 2] = data[i * 3 + 2]
     }
-    const session = await this.segmentationSession()
+    const [ort, session] = await Promise.all([this.runtime(), this.segmentationSession()])
     const results = await session.run({
       pixel_values: new ort.Tensor('uint8', input, [1, SEGMENT_INPUT, SEGMENT_INPUT, 3])
     })
-    const alphas = results.alphas as ort.Tensor
+    const alphas = results.alphas as Ort.Tensor
     const smallMask = Buffer.alloc(SEGMENT_INPUT * SEGMENT_INPUT)
     for (let i = 0; i < SEGMENT_INPUT * SEGMENT_INPUT; i++) {
       smallMask[i] = (alphas.data as Float32Array)[i] > 0.5 ? 255 : 0
     }
-    const { data: fullMask } = await sharp(maskToRgb(smallMask, SEGMENT_INPUT, SEGMENT_INPUT), {
-      raw: { width: SEGMENT_INPUT, height: SEGMENT_INPUT, channels: 3 }
-    })
-      .resize(width, height, { fit: 'fill' })
-      .extractChannel(0)
-      .raw()
-      .toBuffer({ resolveWithObject: true })
-    return { mask: new Uint8Array(fullMask), width, height }
+    const resizedMask = await resizeBinaryMask(
+      smallMask,
+      SEGMENT_INPUT,
+      SEGMENT_INPUT,
+      width,
+      height
+    )
+    return { mask: Uint8Array.from(resizedMask, (value) => value * 255), width, height }
   }
 
   /**
-   * LaMa 修补：遮罩外 100% 保留原图，遮罩内用模型输出并与羽化遮罩合成。
+   * LaMa 修补：模型输入遮罩增加一个像素的安全边界；
+   * 最终仅在原始遮罩内使用模型输出，遮罩外保留原图。
    * 返回与原图同尺寸、已按 EXIF 方向摆正的 WebP。
    */
   async inpaint(
@@ -101,19 +112,26 @@ export class EraseInferenceService {
     width: number,
     height: number
   ): Promise<Buffer> {
-    const session = await this.lamaSession()
-    // 原尺寸像素（合成用）
-    const { data: fullRgb } = await sharp(imagePath)
-      .autoOrient()
-      .resize(width, height, { fit: 'fill' })
-      .raw()
-      .toBuffer({ resolveWithObject: true })
+    const [ort, session] = await Promise.all([this.runtime(), this.lamaSession()])
+    // 原尺寸像素：模型只读 RGB，最终结果保留原图 alpha。
+    const fullRgba = await decodeSrgba(imagePath, width, height)
+    const fullRgb = rgbaToRgb(fullRgba, width, height)
 
     // 等比缩放使最长边 <= 512，边缘复制补边到 512×512
     const scale = Math.min(LAMA_INPUT / width, LAMA_INPUT / height)
     const fitWidth = Math.max(1, Math.round(width * scale))
     const fitHeight = Math.max(1, Math.round(height * scale))
-    const maskResized = await resizeMask(mask, width, height, fitWidth, fitHeight)
+    // LaMa 不只需要遮住人物内部；缩小后边缘的轮廓/颜色仍会让模型继续生成原对象。
+    // 固定为 512 模型空间的少量像素，避免边界随原图分辨率变化。
+    const maskMargin = Math.max(1, Math.ceil(LAMA_MASK_MARGIN / scale))
+    const expandedModelMask = await expandBinaryMask(mask, width, height, maskMargin)
+    const maskResized = await resizeBinaryMask(
+      expandedModelMask,
+      width,
+      height,
+      fitWidth,
+      fitHeight
+    )
     const { data: fitRgb } = await sharp(fullRgb, {
       raw: { width, height, channels: 3 }
     })
@@ -128,7 +146,7 @@ export class EraseInferenceService {
         const sx = Math.min(x, fitWidth - 1)
         const src = sy * fitWidth + sx
         const dst = y * LAMA_INPUT + x
-        const maskBit = maskResized[src] > 0.5 ? 1 : 0
+        const maskBit = maskResized[src]
         // 模型卡明确输入约定为“遮罩区置 0”；均值填充会偏离该导出的验证分布（实测生成异常偏亮）
         input[dst] = maskBit ? 0 : fitRgb[src * 3] / 255
         input[LAMA_INPUT * LAMA_INPUT + dst] = maskBit ? 0 : fitRgb[src * 3 + 1] / 255
@@ -140,7 +158,7 @@ export class EraseInferenceService {
     const results = await session.run({
       input: new ort.Tensor('float32', input, [1, 4, LAMA_INPUT, LAMA_INPUT])
     })
-    const output = (results.output as ort.Tensor).data as Float32Array
+    const output = (results.output as Ort.Tensor).data as Float32Array
 
     const modelCrop = Buffer.alloc(fitWidth * fitHeight * 3)
     for (let y = 0; y < fitHeight; y++) {
@@ -166,128 +184,81 @@ export class EraseInferenceService {
       .raw()
       .toBuffer({ resolveWithObject: true })
 
-    // 羽化宽度随图片尺寸（min 边约 0.8%，钳制 [6, 36]）：
-    // 固定 blur(3) 在高分辨率图片上过渡带只有约 ±9px，锐利原图与填充交界一眼可见。
-    const featherSigma = Math.max(6, Math.min(36, Math.round(Math.min(width, height) * 0.008)))
-    const { data: feather } = await sharp(maskToRgb(mask, width, height), {
-      raw: { width, height, channels: 3 }
-    })
-      .blur(featherSigma)
-      .extractChannel(0)
-      .raw()
-      .toBuffer({ resolveWithObject: true })
-
-    // 原图轻度模糊，用于估算环带高频颗粒强度（见 compositeErase）。
-    const { data: blurredRgb } = await sharp(fullRgb, {
-      raw: { width, height, channels: 3 }
-    })
-      .blur(1.5)
-      .raw()
-      .toBuffer({ resolveWithObject: true })
-
-    const composited = compositeErase(fullRgb, modelFull, mask, feather, blurredRgb, width, height)
-    return sharp(composited, { raw: { width, height, channels: 3 } })
-      .webp({ quality: 92, effort: 4 })
+    const composited = compositeErase(fullRgba, modelFull, mask, width, height)
+    return sharp(composited, { raw: { width, height, channels: 4 } })
+      .webp({ quality: 92, alphaQuality: 100, effort: 4 })
       .toBuffer()
   }
 }
 
-/** 填充颜色对齐偏移上限（像素级）。 */
-const MAX_COLOR_OFFSET = 48
-/** 填充颗粒强度上限（像素级）。 */
-const MAX_GRAIN_SIGMA = 6
-
 /**
- * 合成修补结果：
- * - alpha = min(羽化, 遮罩)，保证模型输出只作用在遮罩内部，遮罩外原图 1:1 保留；
- * - 用“遮罩外环带原图均值 − 填充核心模型均值”的逐通道差对齐填充颜色，
- *   消除模型填充与周边环境的整体色差/亮度差（填充“发灰、发暗”的观感）；
- * - 用环带原图的高频残差估计颗粒强度，给填充区加确定性高斯颗粒，匹配原图质感。
+ * 合成修补结果：遮罩内部完整使用模型 RGB，遮罩外保留原图 RGB，
+ * 遮罩内外始终保留原图 alpha。
+ * 不做按整图尺寸放大的羽化或全局均值校色：它们会让小遮罩
+ * 仅混入少量修补结果，或在多色背景上主动改变模型的正确颜色。
  */
 export function compositeErase(
-  original: Uint8Array,
-  model: Uint8Array,
+  originalRgba: Uint8Array,
+  modelRgb: Uint8Array,
   mask: Uint8Array,
-  feather: Uint8Array,
-  blurredOriginal: Uint8Array,
   width: number,
-  height: number,
-  seed = 0x9e3779b9
+  height: number
 ): Buffer {
   const pixels = width * height
-  const ringSumOriginal = [0, 0, 0]
-  const coreSumModel = [0, 0, 0]
-  let ringResidualSq = 0
-  let ringCount = 0
-  let coreCount = 0
+  const composited = Buffer.alloc(pixels * 4)
   for (let i = 0; i < pixels; i++) {
-    const o = i * 3
-    if (feather[i] > 0 && mask[i] === 0) {
-      for (let channel = 0; channel < 3; channel++) {
-        ringSumOriginal[channel] += original[o + channel]
-        const residual = original[o + channel] - blurredOriginal[o + channel]
-        ringResidualSq += residual * residual
-      }
-      ringCount++
-    } else if (mask[i] === 255 && feather[i] === 255) {
-      for (let channel = 0; channel < 3; channel++) {
-        coreSumModel[channel] += model[o + channel]
-      }
-      coreCount++
-    }
-  }
-  const offset = ringCount > 0 && coreCount > 0
-    ? ringSumOriginal.map((sum, channel) =>
-        clamp(sum / ringCount - coreSumModel[channel] / coreCount, -MAX_COLOR_OFFSET, MAX_COLOR_OFFSET)
-      )
-    : [0, 0, 0]
-  const grainSigma =
-    ringCount > 0 ? Math.min(MAX_GRAIN_SIGMA, Math.sqrt(ringResidualSq / (ringCount * 3)) * 0.8) : 0
-
-  const random = mulberry32(seed)
-  const composited = Buffer.alloc(pixels * 3)
-  for (let i = 0; i < pixels; i++) {
-    const alpha = Math.min(feather[i], mask[i]) / 255
-    const o = i * 3
-    if (alpha <= 0) {
-      composited[o] = original[o]
-      composited[o + 1] = original[o + 1]
-      composited[o + 2] = original[o + 2]
-      continue
-    }
-    const noise = grainSigma > 0 ? gaussianSample(random) * grainSigma : 0
+    const originalOffset = i * 4
+    const modelOffset = i * 3
+    const outputOffset = i * 4
+    const useModel = mask[i] >= 128
     for (let channel = 0; channel < 3; channel++) {
-      const source = o + channel
-      const filled = clamp(model[source] + offset[channel] + noise, 0, 255)
-      composited[source] = Math.round(original[source] * (1 - alpha) + filled * alpha)
+      composited[outputOffset + channel] = useModel
+        ? modelRgb[modelOffset + channel]
+        : originalRgba[originalOffset + channel]
     }
+    composited[outputOffset + 3] = originalRgba[originalOffset + 3]
   }
   return composited
 }
 
-function clamp(value: number, min: number, max: number): number {
-  return Math.max(min, Math.min(max, value))
+/** 模型输入的唯一解码入口：摆正方向、转 sRGB，再明确去除 alpha 得到 RGB。 */
+export async function decodeSrgb(
+  input: string | Buffer,
+  width: number,
+  height: number
+): Promise<Buffer> {
+  const rgba = await decodeSrgba(input, width, height)
+  return rgbaToRgb(rgba, width, height)
 }
 
-/** 确定性伪随机数（mulberry32），保证颗粒结果可复现。 */
-function mulberry32(seed: number): () => number {
-  let state = seed >>> 0
-  return () => {
-    state = (state + 0x6d2b79f5) | 0
-    let t = Math.imul(state ^ (state >>> 15), 1 | state)
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+/** 最终合成的解码入口：摆正方向、转 sRGB，并始终输出 RGBA。 */
+export async function decodeSrgba(
+  input: string | Buffer,
+  width: number,
+  height: number
+): Promise<Buffer> {
+  const { data, info } = await sharp(input)
+    .autoOrient()
+    .toColourspace('srgb')
+    .ensureAlpha()
+    .resize(width, height, { fit: 'fill' })
+    .raw()
+    .toBuffer({ resolveWithObject: true })
+  if (info.channels !== 4) throw new Error('图片无法转换为 sRGB RGBA 像素。')
+  return data
+}
+
+function rgbaToRgb(rgba: Uint8Array, width: number, height: number): Buffer {
+  const rgb = Buffer.alloc(width * height * 3)
+  for (let i = 0; i < width * height; i++) {
+    rgb[i * 3] = rgba[i * 4]
+    rgb[i * 3 + 1] = rgba[i * 4 + 1]
+    rgb[i * 3 + 2] = rgba[i * 4 + 2]
   }
+  return rgb
 }
 
-/** 标准正态采样（Box-Muller）。 */
-function gaussianSample(random: () => number): number {
-  const u = Math.max(random(), 1e-12)
-  const v = random()
-  return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v)
-}
-
-async function resizeMask(
+export async function resizeBinaryMask(
   mask: Uint8Array,
   width: number,
   height: number,
@@ -297,11 +268,32 @@ async function resizeMask(
   const { data } = await sharp(maskToRgb(mask, width, height), {
     raw: { width, height, channels: 3 }
   })
-    .resize(fitWidth, fitHeight, { fit: 'fill' })
+    .resize(fitWidth, fitHeight, { fit: 'fill', kernel: sharp.kernel.nearest })
     .extractChannel(0)
     .raw()
     .toBuffer({ resolveWithObject: true })
-  return new Uint8Array(data)
+  return Uint8Array.from(data, (value) => (value >= 128 ? 1 : 0))
+}
+
+/**
+ * 为模型输入遮罩增加小幅安全边界，让模型看不到待消除对象的轮廓。
+ * Sharp 的 erode 对白色前景扩张；最终再二值化，不引入羽化或半透明混合。
+ */
+export async function expandBinaryMask(
+  mask: Uint8Array,
+  width: number,
+  height: number,
+  radius: number
+): Promise<Uint8Array> {
+  if (radius < 1) return Uint8Array.from(mask, (value) => (value >= 128 ? 255 : 0))
+  const { data } = await sharp(maskToRgb(mask, width, height), {
+    raw: { width, height, channels: 3 }
+  })
+    .erode(radius)
+    .extractChannel(0)
+    .raw()
+    .toBuffer({ resolveWithObject: true })
+  return Uint8Array.from(data, (value) => (value >= 128 ? 255 : 0))
 }
 
 /** sharp 的 raw 输入不支持单通道，把二值遮罩展开为 RGB。 */

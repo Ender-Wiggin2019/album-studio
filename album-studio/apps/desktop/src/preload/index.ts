@@ -1,4 +1,9 @@
-import { IMAGE_PIPELINE_VERSION, IPC_CHANNELS, type AlbumStudioApi } from '@album-studio/common'
+import {
+  IMAGE_PIPELINE_VERSION,
+  IPC_CHANNELS,
+  ImageCropSchema,
+  type AlbumStudioApi
+} from '@album-studio/common'
 import { contextBridge, ipcRenderer } from 'electron'
 
 const api: AlbumStudioApi = Object.freeze({
@@ -21,6 +26,8 @@ const api: AlbumStudioApi = Object.freeze({
       })
       if (usage?.width !== undefined) query.set('width', String(usage.width))
       if (usage?.height !== undefined) query.set('height', String(usage.height))
+      if (usage?.crop !== undefined)
+        query.set('crop', JSON.stringify(ImageCropSchema.parse(usage.crop)))
       if (usage?.eraseKey !== undefined) query.set('erase', usage.eraseKey)
       return `album-asset://project/${encodeURIComponent(projectId)}/${encodeURIComponent(assetId)}?${query.toString()}`
     }

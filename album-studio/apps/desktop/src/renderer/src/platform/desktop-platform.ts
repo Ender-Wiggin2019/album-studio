@@ -1,4 +1,4 @@
-import type { AlbumDocument, AlbumStudioApi } from '@album-studio/common'
+import type { AlbumDocument, AlbumStudioApi, ImageCrop } from '@album-studio/common'
 import type { AssetSourceRequest, RecentStudioProject, StudioPlatform } from '@album-studio/studio'
 
 type OpenedProject = {
@@ -9,6 +9,7 @@ type OpenedProject = {
 type AssetUsage = {
   width?: number
   height?: number
+  crop?: ImageCrop
   eraseKey?: string
 }
 
@@ -44,7 +45,8 @@ export function createDesktopPlatform(api: AlbumStudioApi = window.albumStudio):
     if (width === undefined || height === undefined) return undefined
     return {
       width: clampRatio(width),
-      height: clampRatio(height)
+      height: clampRatio(height),
+      ...(request.crop ? { crop: request.crop } : {})
     }
   }
 
@@ -84,11 +86,15 @@ export function createDesktopPlatform(api: AlbumStudioApi = window.albumStudio):
       async pickCandidates(documentId, source) {
         return api.assets.pickCandidates({ projectPath: pathFor(documentId), source })
       },
-      async importCandidates(documentId, candidateIds) {
-        return api.assets.importCandidates({ projectPath: pathFor(documentId), candidateIds })
+      async importCandidates(documentId, sessionId, candidateIds) {
+        return api.assets.importCandidates({
+          projectPath: pathFor(documentId),
+          sessionId,
+          candidateIds
+        })
       },
-      async releaseCandidates(candidateIds) {
-        return api.assets.releaseCandidates({ candidateIds })
+      async releaseCandidates(sessionId) {
+        return api.assets.releaseCandidates({ sessionId })
       },
       async relink(documentId, assetId) {
         return api.assets.relink({ projectPath: pathFor(documentId), assetId })

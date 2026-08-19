@@ -6,14 +6,21 @@ import {
   ReleaseCandidatesRequestSchema,
   type AssetRecord,
   type ImportAssetsResult,
-  type ImportCandidate
+  type ImportCandidate,
+  type ImportCandidateSession
 } from '@album-studio/common'
 import { IMAGE_PIPELINE_VERSION } from '@album-studio/common'
 import { app, BrowserWindow, dialog } from 'electron'
 import { mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises'
 import { basename, dirname, extname, join } from 'node:path'
+import { randomUUID } from 'node:crypto'
 import sharp from 'sharp'
-import { imageStore, MAX_INPUT_PIXELS, type ImageStore, type SupportedImageMimeType } from './image-store'
+import {
+  imageStore,
+  MAX_INPUT_PIXELS,
+  type ImageStore,
+  type SupportedImageMimeType
+} from './image-store'
 import type { ProjectRepository } from '../projects/project-repository'
 
 const MIME_BY_EXTENSION = new Map<string, SupportedImageMimeType>([
@@ -25,6 +32,13 @@ const MIME_BY_EXTENSION = new Map<string, SupportedImageMimeType>([
 ])
 
 const LAST_IMPORT_FOLDER_FILE = 'last-import-folder.json'
+
+type CandidateSession = {
+  projectPath: string
+  candidatePaths: Map<string, string>
+  candidateThumbs: Map<string, { data: Buffer; contentType: string }>
+  importing: boolean
+}
 
 async function collectImageFiles(directory: string): Promise<string[]> {
   const output: string[] = []
@@ -47,8 +61,7 @@ async function collectImageFiles(directory: string): Promise<string[]> {
 }
 
 export class AssetService {
-  private readonly candidatePaths = new Map<string, string>()
-  private readonly candidateThumbs = new Map<string, { data: Buffer; contentType: string }>()
+  private readonly candidateSessions = new Map<string, CandidateSession>()
   private readonly lastImportFolderPath: string
 
   constructor(
@@ -62,7 +75,7 @@ export class AssetService {
   async chooseCandidates(
     window: BrowserWindow,
     input: unknown
-  ): Promise<ImportCandidate[] | null> {
+  ): Promise<ImportCandidateSession | null> {
     const request = PickImportCandidatesRequestSchema.parse(input)
     const selection = await dialog.showOpenDialog(window, {
       title: request.source === 'folder' ? '选择照片文件夹' : '选择照片',
@@ -85,12 +98,12 @@ export class AssetService {
       request.source === 'folder'
         ? await collectImageFiles(selection.filePaths[0])
         : selection.filePaths
-    this.candidatePaths.clear()
-    this.candidateThumbs.clear()
+    const sessionId = randomUUID()
+    const candidatePaths = new Map<string, string>()
     const candidates: ImportCandidate[] = []
-    for (const [index, sourcePath] of files.entries()) {
-      const id = `candidate-${index + 1}`
-      this.candidatePaths.set(id, sourcePath)
+    for (const sourcePath of files) {
+      const id = randomUUID()
+      candidatePaths.set(id, sourcePath)
       let byteSize = 0
       let width: number | undefined
       let height: number | undefined
@@ -112,38 +125,56 @@ export class AssetService {
         byteSize,
         width,
         height,
-        previewUrl: `album-candidate://preview/${id}?v=${IMAGE_PIPELINE_VERSION}`
+        previewUrl: `album-candidate://preview/${sessionId}/${id}?v=${IMAGE_PIPELINE_VERSION}`
       })
     }
-    return candidates
+    if (candidates.length === 0) return null
+    this.candidateSessions.set(sessionId, {
+      projectPath: request.projectPath,
+      candidatePaths,
+      candidateThumbs: new Map(),
+      importing: false
+    })
+    return { id: sessionId, candidates }
   }
 
   async importCandidates(input: unknown): Promise<ImportAssetsResult | null> {
     const request = ImportCandidatesRequestSchema.parse(input)
-    const files = request.candidateIds
-      .map((id) => this.candidatePaths.get(id))
-      .filter((path): path is string => Boolean(path))
-    if (files.length === 0) return null
-    const result = await this.importFiles(request.projectPath, files)
-    this.candidatePaths.clear()
-    this.candidateThumbs.clear()
-    return result
+    const session = this.candidateSessions.get(request.sessionId)
+    if (!session) throw new Error('候选照片会话已失效，请重新选择。')
+    if (session.projectPath !== request.projectPath) {
+      throw new Error('候选照片不属于当前项目。')
+    }
+    if (session.importing) throw new Error('这批候选照片正在导入。')
+    const files = request.candidateIds.map((id) => session.candidatePaths.get(id))
+    if (!files.every((path): path is string => typeof path === 'string')) {
+      throw new Error('候选照片已变更，请重新选择。')
+    }
+    session.importing = true
+    try {
+      const result = await this.importFiles(request.projectPath, files)
+      this.candidateSessions.delete(request.sessionId)
+      return result
+    } catch (error) {
+      session.importing = false
+      throw error
+    }
   }
 
   async releaseCandidates(input: unknown): Promise<void> {
     const request = ReleaseCandidatesRequestSchema.parse(input)
-    for (const id of request.candidateIds) {
-      this.candidatePaths.delete(id)
-      this.candidateThumbs.delete(id)
-    }
+    this.candidateSessions.delete(request.sessionId)
   }
 
   async resolveCandidatePreview(
+    sessionId: string,
     candidateId: string
   ): Promise<{ data: Buffer; contentType: string } | null> {
-    const cached = this.candidateThumbs.get(candidateId)
+    const session = this.candidateSessions.get(sessionId)
+    if (!session) return null
+    const cached = session.candidateThumbs.get(candidateId)
     if (cached) return cached
-    const sourcePath = this.candidatePaths.get(candidateId)
+    const sourcePath = session.candidatePaths.get(candidateId)
     if (!sourcePath) return null
     try {
       const data = await sharp(sourcePath, {
@@ -156,7 +187,9 @@ export class AssetService {
         .webp({ quality: 76, effort: 4 })
         .toBuffer()
       const preview = { data, contentType: 'image/webp' }
-      this.candidateThumbs.set(candidateId, preview)
+      if (this.candidateSessions.get(sessionId) === session) {
+        session.candidateThumbs.set(candidateId, preview)
+      }
       return preview
     } catch {
       return null

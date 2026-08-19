@@ -10,16 +10,22 @@ import { createAssetProtocolResponse, parseAssetProtocolRequest } from './asset-
 
 describe('album-asset protocol', () => {
   it('parses a versioned print request using normalized Block usage', () => {
-    expect(
-      parseAssetProtocolRequest(
-        'album-asset://project/project-1/asset-a?quality=print&width=0.25&height=0.5&v=1'
-      )
-    ).toEqual({
+    const crop = {
+      area: { x: 10, y: 20, width: 70, height: 60 },
+      rotationDeg: 90,
+      flipX: true,
+      flipY: false
+    }
+    const url = new URL(
+      'album-asset://project/project-1/asset-a?quality=print&width=0.25&height=0.5&v=1'
+    )
+    url.searchParams.set('crop', JSON.stringify(crop))
+    expect(parseAssetProtocolRequest(url.toString())).toEqual({
       projectId: 'project-1',
       assetId: 'asset-a',
       variant: {
         variant: 'print',
-        usage: { widthFraction: 0.25, heightFraction: 0.5 }
+        usage: { widthFraction: 0.25, heightFraction: 0.5, crop }
       }
     })
   })
@@ -51,6 +57,8 @@ describe('album-asset protocol', () => {
     'album-asset://project/project-1/asset%2Fa?v=1',
     'album-asset://project/project-1/asset-a?quality=print&width=0.5&v=1',
     'album-asset://project/project-1/asset-a?quality=print&width=2&height=0.5&v=1',
+    'album-asset://project/project-1/asset-a?quality=print&width=0.5&height=0.5&crop=%7Bbad&v=1',
+    'album-asset://project/project-1/asset-a?quality=preview&crop=%7B%7D&v=1',
     'album-asset://project/project-1/asset-a?quality=raw&v=1',
     'album-asset://project/project-1/asset-a',
     'album-asset://project/project-1/asset-a?v=old'

@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import { AUTO_ENHANCE_CONSTANTS, analyzeAutoEnhance } from '../src'
 
-function solidPixels(rgb: [number, number, number], width: number, height: number): Uint8ClampedArray {
+function solidPixels(
+  rgb: [number, number, number],
+  width: number,
+  height: number
+): Uint8ClampedArray {
   const pixels = new Uint8ClampedArray(width * height * 4)
   for (let index = 0; index < width * height; index += 1) {
     const offset = index * 4
@@ -29,6 +33,12 @@ function mixedPixels(
     pixels[offset + 3] = 255
   }
   return pixels
+}
+
+function pixelsWithAlpha(
+  colors: ReadonlyArray<readonly [number, number, number, number]>
+): Uint8ClampedArray {
+  return new Uint8ClampedArray(colors.flatMap((color) => [...color]))
 }
 
 describe('analyzeAutoEnhance', () => {
@@ -60,14 +70,36 @@ describe('analyzeAutoEnhance', () => {
 
   it('平灰照片提升对比度（按分位跨度补足，封顶）', () => {
     // 90..150 亮度跨度 60/255 ≈ 0.235 < 0.35 → 0.55/0.235 ≈ 2.34 → 夹到 1.3
-    const result = analyzeAutoEnhance(mixedPixels([[90, 90, 90], [150, 150, 150]], 4, 4), 4, 4)
+    const result = analyzeAutoEnhance(
+      mixedPixels(
+        [
+          [90, 90, 90],
+          [150, 150, 150]
+        ],
+        4,
+        4
+      ),
+      4,
+      4
+    )
     expect(result.contrast).toBe(AUTO_ENHANCE_CONSTANTS.contrastMax)
     expect(result.contrast).toBeGreaterThan(1)
   })
 
   it('高对比照片不再提升对比度', () => {
     // 黑 + 白分位跨度 ≈ 1 > 0.35
-    const result = analyzeAutoEnhance(mixedPixels([[0, 0, 0], [255, 255, 255]], 4, 4), 4, 4)
+    const result = analyzeAutoEnhance(
+      mixedPixels(
+        [
+          [0, 0, 0],
+          [255, 255, 255]
+        ],
+        4,
+        4
+      ),
+      4,
+      4
+    )
     expect(result.contrast).toBe(1)
   })
 
@@ -90,14 +122,68 @@ describe('analyzeAutoEnhance', () => {
 
   it('色彩鲜艳的照片不再提升饱和度', () => {
     // 纯红 + 纯蓝 + 纯绿平均彩度 ≈ 1
-    const result = analyzeAutoEnhance(mixedPixels([[255, 0, 0], [0, 255, 0], [0, 0, 255]], 3, 3), 3, 3)
+    const result = analyzeAutoEnhance(
+      mixedPixels(
+        [
+          [255, 0, 0],
+          [0, 255, 0],
+          [0, 0, 255]
+        ],
+        3,
+        3
+      ),
+      3,
+      3
+    )
     expect(result.saturation).toBe(1)
   })
 
   it('状态正常的照片三参数全部保持中性', () => {
     // 平均亮度 ≈ 0.51、跨度 ≈ 0.55 ≥ 0.35、黑白照片 → 全部 1
-    const result = analyzeAutoEnhance(mixedPixels([[60, 60, 60], [200, 200, 200]], 4, 4), 4, 4)
+    const result = analyzeAutoEnhance(
+      mixedPixels(
+        [
+          [60, 60, 60],
+          [200, 200, 200]
+        ],
+        4,
+        4
+      ),
+      4,
+      4
+    )
     expect(result).toEqual({ brightness: 1, contrast: 1, saturation: 1 })
+  })
+
+  it('透明像素不会被当成黑色背景误提亮', () => {
+    const opaque = analyzeAutoEnhance(
+      pixelsWithAlpha([
+        [60, 60, 60, 255],
+        [200, 200, 200, 255]
+      ]),
+      2,
+      1
+    )
+    const withTransparentCorners = analyzeAutoEnhance(
+      pixelsWithAlpha([
+        [60, 60, 60, 255],
+        [200, 200, 200, 255],
+        ...Array.from({ length: 14 }, () => [0, 0, 0, 0] as const)
+      ]),
+      4,
+      4
+    )
+
+    expect(withTransparentCorners).toEqual(opaque)
+    expect(withTransparentCorners.brightness).toBe(1)
+  })
+
+  it('全透明图像返回中性参数', () => {
+    expect(analyzeAutoEnhance(new Uint8ClampedArray(4 * 4 * 4), 4, 4)).toEqual({
+      brightness: 1,
+      contrast: 1,
+      saturation: 1
+    })
   })
 
   it('空输入返回中性参数', () => {

@@ -54,7 +54,7 @@ describe('editImageSource', () => {
   function stubBitmap(width = 2, height = 2): void {
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () => new Response(new Blob(['image']), { status: 200 }))
+      vi.fn(async () => new Response('image', { status: 200 }))
     )
     vi.stubGlobal(
       'createImageBitmap',
@@ -92,7 +92,7 @@ describe('editImageSource', () => {
     expect(URL.createObjectURL).toHaveBeenCalled()
   })
 
-  it('applies beauty pixels together with rotation in one pass', async () => {
+  it('applies beauty pixels before drawing the rotated result', async () => {
     const { context } = stubCanvas()
     stubBitmap(2, 2)
     const params: EditSourceParams = { ...PARAMS, beautySmooth: 0.5, rotationDeg: 45 }
@@ -100,11 +100,12 @@ describe('editImageSource', () => {
     const result = await editImageSource('album-asset://project/p/a?v=1', params)
 
     expect(result).toBe('blob:edited')
-    expect(context.getImageData).toHaveBeenCalledWith(0, 0, 3, 3)
+    expect(context.getImageData).toHaveBeenCalledWith(0, 0, 2, 2)
     expect(context.putImageData).toHaveBeenCalledTimes(1)
+    expect(context.drawImage).toHaveBeenCalledTimes(2)
   })
 
-  it('degrades to the original URL when canvas 2d is unavailable', async () => {
+  it('reports a processing failure when canvas 2d is unavailable', async () => {
     stubBitmap(2, 2)
     vi.stubGlobal('document', {
       ...document,
@@ -113,14 +114,14 @@ describe('editImageSource', () => {
 
     await expect(
       editImageSource('album-asset://project/p/a?v=1', { ...PARAMS, rotationDeg: 30 })
-    ).resolves.toBe('album-asset://project/p/a?v=1')
+    ).rejects.toThrow('Canvas 2D')
   })
 
-  it('degrades to the original URL when the source cannot be loaded', async () => {
+  it('reports a processing failure when the source cannot be loaded', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(null, { status: 404 })))
 
     await expect(
       editImageSource('album-asset://project/p/a?v=1', { ...PARAMS, flipY: true })
-    ).resolves.toBe('album-asset://project/p/a?v=1')
+    ).rejects.toThrow('无法读取图片')
   })
 })

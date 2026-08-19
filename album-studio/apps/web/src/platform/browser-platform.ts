@@ -3,6 +3,8 @@ import {
   createAlbumDocument,
   pageSpecSizeAtDpi,
   parseAlbumDocument,
+  printImageDerivativeSize,
+  printImageTargetSize,
   type AlbumDocument,
   type AssetRecord,
   type PageSpec
@@ -24,6 +26,7 @@ import {
   writeFile,
   writeJson
 } from './opfs'
+import type { WebpDerivativeBounds } from './browser-image-pipeline'
 
 const MANIFEST_FILE = 'manifest.json'
 let imagePipelinePromise: Promise<typeof import('./browser-image-pipeline')> | null = null
@@ -41,6 +44,17 @@ const SUPPORTED_IMAGE_TYPES = new Set<AssetRecord['mimeType']>([
 ])
 
 type SourceCacheEntry = { url: string; references: number }
+type DerivativeQuality = Exclude<AssetQuality, 'original' | 'erased'>
+type BrowserDerivativeBounds = WebpDerivativeBounds & {
+  cacheSize?: { width: number; height: number }
+}
+
+type BrowserCandidateSession = {
+  documentId: string
+  files: Map<string, File>
+  urls: Map<string, string>
+  importing: boolean
+}
 
 class TaskPool {
   private active = 0
@@ -84,32 +98,44 @@ function selectImageFiles(source: 'files' | 'folder'): Promise<File[]> {
 }
 
 function derivativeBounds(
-  quality: Exclude<AssetQuality, 'original'>,
+  asset: AssetRecord,
+  quality: DerivativeQuality,
   request: AssetSourceRequest,
   pageSpec: PageSpec
-): { width: number; height: number; quality: number } {
+): BrowserDerivativeBounds {
   if (quality === 'thumbnail') return { width: 480, height: 480, quality: 0.82 }
   if (quality === 'preview') return { width: 2048, height: 2048, quality: 0.86 }
   const pageTarget = pageSpecSizeAtDpi(pageSpec, 300)
+  const usage = {
+    widthFraction: request.pageWidthRatio ?? 1,
+    heightFraction: request.pageHeightRatio ?? 1
+  }
+  const target = printImageTargetSize({ pageSpec, dpi: 300, usage })
+  const output = printImageDerivativeSize({
+    sourceSize: asset,
+    pageSpec,
+    dpi: 300,
+    usage,
+    crop: request.crop
+  })
   return {
-    width: Math.min(
-      pageTarget.width,
-      Math.max(1, Math.round(pageTarget.width * (request.pageWidthRatio ?? 1)))
-    ),
-    height: Math.min(
-      pageTarget.height,
-      Math.max(1, Math.round(pageTarget.height * (request.pageHeightRatio ?? 1)))
-    ),
-    quality: 0.92
+    ...target,
+    quality: 0.92,
+    fit: 'cover',
+    crop: request.crop,
+    maximumPixels: pageTarget.width * pageTarget.height,
+    cacheSize: output
   }
 }
 
 function derivativeName(
   asset: AssetRecord,
-  quality: Exclude<AssetQuality, 'original'>,
-  bounds: { width: number; height: number }
+  quality: DerivativeQuality,
+  bounds: BrowserDerivativeBounds
 ): string {
-  return `${asset.contentHash}-${quality}-${bounds.width}x${bounds.height}.webp`
+  const size = bounds.cacheSize ?? bounds
+  const mode = quality === 'print' ? '-cover' : ''
+  return `${asset.contentHash}-${quality}${mode}-${size.width}x${size.height}.webp`
 }
 
 async function originalFile(documentId: string, asset: AssetRecord): Promise<File> {
@@ -129,8 +155,14 @@ export function createBrowserPlatform(options?: {
   const derivatives = new TaskPool(2)
   const sourcesByKey = new Map<string, SourceCacheEntry>()
   const keysByUrl = new Map<string, string>()
-  const candidateFiles = new Map<string, File>()
-  const candidateUrls = new Map<string, string>()
+  const candidateSessions = new Map<string, BrowserCandidateSession>()
+
+  const releaseCandidateSession = (sessionId: string): void => {
+    const session = candidateSessions.get(sessionId)
+    if (!session) return
+    for (const url of session.urls.values()) URL.revokeObjectURL(url)
+    candidateSessions.delete(sessionId)
+  }
 
   void requestPersistentStorage()
 
@@ -152,11 +184,11 @@ export function createBrowserPlatform(options?: {
   const ensureDerivative = async (
     documentId: string,
     asset: AssetRecord,
-    quality: Exclude<AssetQuality, 'original'>,
+    quality: DerivativeQuality,
     request: AssetSourceRequest,
     pageSpec: PageSpec
   ): Promise<{ file: File; cacheKey: string }> => {
-    const bounds = derivativeBounds(quality, request, pageSpec)
+    const bounds = derivativeBounds(asset, quality, request, pageSpec)
     const name = derivativeName(asset, quality, bounds)
     const project = await getProjectDirectory(documentId)
     const cache = await getNestedDirectory(
@@ -232,13 +264,7 @@ export function createBrowserPlatform(options?: {
             { quality: 'thumbnail' },
             document.pageSpec
           ),
-          ensureDerivative(
-            documentId,
-            asset,
-            'preview',
-            { quality: 'preview' },
-            document.pageSpec
-          )
+          ensureDerivative(documentId, asset, 'preview', { quality: 'preview' }, document.pageSpec)
         ])
       } catch (error) {
         skipped.push({
@@ -291,11 +317,11 @@ export function createBrowserPlatform(options?: {
       async pickCandidates(documentId, source) {
         const files = await chooseFiles(source)
         if (files.length === 0) return null
-        for (const url of candidateUrls.values()) URL.revokeObjectURL(url)
-        candidateFiles.clear()
-        candidateUrls.clear()
-        return files.map((file, index) => {
-          const id = `candidate-${index + 1}`
+        const sessionId = globalThis.crypto.randomUUID()
+        const candidateFiles = new Map<string, File>()
+        const candidateUrls = new Map<string, string>()
+        const candidates = files.map((file) => {
+          const id = globalThis.crypto.randomUUID()
           candidateFiles.set(id, file)
           const url = URL.createObjectURL(file)
           candidateUrls.set(id, url)
@@ -306,28 +332,37 @@ export function createBrowserPlatform(options?: {
             previewUrl: url
           }
         })
+        candidateSessions.set(sessionId, {
+          documentId,
+          files: candidateFiles,
+          urls: candidateUrls,
+          importing: false
+        })
+        return { id: sessionId, candidates }
       },
-      async importCandidates(documentId, candidateIds) {
-        const files = candidateIds
-          .map((id) => candidateFiles.get(id))
-          .filter((file): file is File => Boolean(file))
-        if (files.length === 0) return null
-        const result = await importFilesIntoDocument(documentId, files)
-        for (const id of candidateIds) {
-          const url = candidateUrls.get(id)
-          if (url) URL.revokeObjectURL(url)
-          candidateFiles.delete(id)
-          candidateUrls.delete(id)
+      async importCandidates(documentId, sessionId, candidateIds) {
+        const session = candidateSessions.get(sessionId)
+        if (!session) throw new Error('候选照片会话已失效，请重新选择。')
+        if (session.documentId !== documentId) {
+          throw new Error('候选照片不属于当前项目。')
         }
-        return result
+        if (session.importing) throw new Error('这批候选照片正在导入。')
+        const files = candidateIds.map((id) => session.files.get(id))
+        if (!files.every((file): file is File => file instanceof File)) {
+          throw new Error('候选照片已变更，请重新选择。')
+        }
+        session.importing = true
+        try {
+          const result = await importFilesIntoDocument(documentId, files)
+          releaseCandidateSession(sessionId)
+          return result
+        } catch (error) {
+          session.importing = false
+          throw error
+        }
       },
-      releaseCandidates(candidateIds) {
-        for (const id of candidateIds) {
-          const url = candidateUrls.get(id)
-          if (url) URL.revokeObjectURL(url)
-          candidateFiles.delete(id)
-          candidateUrls.delete(id)
-        }
+      async releaseCandidates(sessionId) {
+        releaseCandidateSession(sessionId)
       },
       async relink() {
         return null

@@ -4,6 +4,9 @@ import { cn } from '@/shared/lib/cn'
 
 function Slider({
   className,
+  'aria-label': ariaLabel,
+  'aria-labelledby': ariaLabelledBy,
+  'aria-describedby': ariaDescribedBy,
   ...props
 }: React.ComponentProps<typeof SliderPrimitive.Root>): React.JSX.Element {
   const values = props.value ?? props.defaultValue ?? [0]
@@ -21,6 +24,9 @@ function Slider({
       {values.map((_, index) => (
         <SliderPrimitive.Thumb
           key={index}
+          aria-label={ariaLabel && values.length > 1 ? `${ariaLabel} ${index + 1}` : ariaLabel}
+          aria-labelledby={ariaLabelledBy}
+          aria-describedby={ariaDescribedBy}
           className="block size-4 rounded-full border-2 border-primary bg-background shadow-sm outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring"
         />
       ))}

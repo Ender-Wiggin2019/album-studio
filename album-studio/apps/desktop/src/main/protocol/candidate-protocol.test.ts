@@ -11,7 +11,10 @@ import {
 
 describe('album-candidate protocol', () => {
   it('parses a versioned preview request', () => {
-    expect(parseCandidateProtocolRequest('album-candidate://preview/candidate-1?v=1')).toEqual({
+    expect(
+      parseCandidateProtocolRequest('album-candidate://preview/session-a/candidate-1?v=1')
+    ).toEqual({
+      sessionId: 'session-a',
       candidateId: 'candidate-1'
     })
   })
@@ -19,10 +22,12 @@ describe('album-candidate protocol', () => {
   it.each([
     'album-candidate://other/candidate-1?v=1',
     'album-candidate://preview?v=1',
-    'album-candidate://preview/a/b?v=1',
+    'album-candidate://preview/a?v=1',
+    'album-candidate://preview/a/b/c?v=1',
     'album-candidate://preview/candidate%2F1?v=1',
-    'album-candidate://preview/candidate-1',
-    'album-candidate://preview/candidate-1?v=old'
+    'album-candidate://preview/session-a/candidate%2F1?v=1',
+    'album-candidate://preview/session-a/candidate-1',
+    'album-candidate://preview/session-a/candidate-1?v=old'
   ])('rejects an invalid candidate URL: %s', (url) => {
     expect(() => parseCandidateProtocolRequest(url)).toThrow()
   })
@@ -36,11 +41,11 @@ describe('album-candidate protocol', () => {
     }
 
     const response = await createCandidateProtocolResponse(
-      'album-candidate://preview/candidate-1?v=1',
+      'album-candidate://preview/session-a/candidate-1?v=1',
       resolver
     )
 
-    expect(resolver.resolveCandidatePreview).toHaveBeenCalledWith('candidate-1')
+    expect(resolver.resolveCandidatePreview).toHaveBeenCalledWith('session-a', 'candidate-1')
     expect(response.status).toBe(200)
     expect(response.headers.get('cache-control')).toBe('no-store')
     expect(response.headers.get('content-type')).toBe('image/webp')
@@ -50,7 +55,7 @@ describe('album-candidate protocol', () => {
 
   it('returns 404 when the candidate session is gone', async () => {
     const response = await createCandidateProtocolResponse(
-      'album-candidate://preview/candidate-1?v=1',
+      'album-candidate://preview/session-a/candidate-1?v=1',
       { resolveCandidatePreview: async () => null }
     )
 
@@ -61,7 +66,7 @@ describe('album-candidate protocol', () => {
 
   it('does not expose resolver errors in protocol responses', async () => {
     const response = await createCandidateProtocolResponse(
-      'album-candidate://preview/candidate-1?v=1',
+      'album-candidate://preview/session-a/candidate-1?v=1',
       { resolveCandidatePreview: async () => Promise.reject(new Error('/private/path/photo.jpg')) }
     )
 

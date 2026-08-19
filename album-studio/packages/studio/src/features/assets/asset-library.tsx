@@ -1,7 +1,4 @@
-import {
-  type AlbumCommand,
-  type AssetRecord
-} from '@album-studio/common'
+import { type AlbumCommand, type AssetRecord } from '@album-studio/common'
 import {
   EyeIcon,
   FolderPlusIcon,
@@ -12,9 +9,10 @@ import {
   SearchIcon,
   XIcon
 } from 'lucide-react'
-import { useDeferredValue, useEffect, useMemo, useState } from 'react'
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
-import type { ImportCandidate } from '@/app/platform/studio-platform'
+import type { ImportCandidateSession } from '@/app/platform/studio-platform'
+import { trackAssetImport } from '@/app/pending-asset-imports'
 import { useStudioPlatform } from '@/app/platform/use-studio-platform'
 import { useStudioStore } from '@/app/store'
 import { useDraggableBlockSource } from '@/features/block-placement/draggable-block-source'
@@ -23,6 +21,13 @@ import { AssetImage } from '@/shared/assets/asset-image'
 import { cn } from '@/shared/lib/cn'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyMedia,
+  EmptyTitle
+} from '@/components/ui/empty'
 import { PhotoPreviewOverlay, type PhotoPreviewItem } from './photo-preview-overlay'
 import {
   Dialog,
@@ -33,11 +38,17 @@ import {
   DialogHeader,
   DialogTitle
 } from '@/components/ui/dialog'
-import { Input } from '@/components/ui/input'
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupButton,
+  InputGroupInput
+} from '@/components/ui/input-group'
 import { Progress } from '@/components/ui/progress'
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
   SelectTrigger,
   SelectValue
@@ -45,6 +56,7 @@ import {
 import { ImportCandidatesDialog } from './import-candidates-dialog'
 
 type SortMode = 'name' | 'imported'
+type OwnedCandidateSession = ImportCandidateSession & { documentId: string }
 
 function chunks<T>(items: readonly T[], size: number): T[][] {
   return Array.from({ length: Math.ceil(items.length / size) }, (_, index) =>
@@ -172,15 +184,84 @@ export function ProjectAssetsPanel(): React.JSX.Element {
   const [query, setQuery] = useState('')
   const deferredQuery = useDeferredValue(query)
   const [sortMode, setSortMode] = useState<SortMode>('name')
-  const [importing, setImporting] = useState(false)
-  const [candidates, setCandidates] = useState<ImportCandidate[] | null>(null)
+  const [pickingRequest, setPickingRequest] = useState<{
+    documentId: string
+    scopeGeneration: number
+  } | null>(null)
+  const [importingRequest, setImportingRequest] = useState<{
+    sessionId: string
+    scopeGeneration: number
+  } | null>(null)
+  const [requestScope, setRequestScope] = useState({
+    documentId: document?.id,
+    generation: 0
+  })
+  const [importError, setImportError] = useState<string | null>(null)
+  const [candidateSession, setCandidateSession] = useState<OwnedCandidateSession | null>(null)
   const [destinationOpen, setDestinationOpen] = useState(false)
   const [lastSkipped, setLastSkipped] = useState<Array<{ fileName: string; reason: string }>>([])
   const [relinkingAssetId, setRelinkingAssetId] = useState<string | null>(null)
   const [expanded, setExpanded] = useState(false)
   const [previewIndex, setPreviewIndex] = useState<number | null>(null)
+  const candidateSessionRef = useRef<OwnedCandidateSession | null>(null)
+  const expandButtonRef = useRef<HTMLButtonElement>(null)
+  const expandedDialogRef = useRef<HTMLDivElement>(null)
+  const mountedRef = useRef(false)
+  const pickRequestRef = useRef(0)
+  const importRequestRef = useRef(0)
+  if (requestScope.documentId !== document?.id) {
+    setRequestScope({ documentId: document?.id, generation: requestScope.generation + 1 })
+    if (candidateSession) setCandidateSession(null)
+  }
+  const picking =
+    pickingRequest !== null &&
+    pickingRequest.documentId === document?.id &&
+    pickingRequest.scopeGeneration === requestScope.generation
+  const importing =
+    importingRequest !== null &&
+    importingRequest.sessionId === candidateSession?.id &&
+    importingRequest.scopeGeneration === requestScope.generation
   const canImportFolder = platform.capabilities.has('folder-import')
   const canRelink = platform.capabilities.has('asset-relink')
+
+  const releaseCandidateSession = useCallback(
+    (sessionId: string): void => {
+      void Promise.resolve(platform.assets.releaseCandidates(sessionId)).catch(() => undefined)
+    },
+    [platform]
+  )
+
+  const finishCandidateSession = useCallback(
+    (expectedSessionId?: string): void => {
+      const active = candidateSessionRef.current
+      if (!active || (expectedSessionId && active.id !== expectedSessionId)) return
+      candidateSessionRef.current = null
+      setCandidateSession(null)
+      releaseCandidateSession(active.id)
+    },
+    [releaseCandidateSession]
+  )
+
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+      pickRequestRef.current += 1
+      importRequestRef.current += 1
+      const active = candidateSessionRef.current
+      candidateSessionRef.current = null
+      if (active) releaseCandidateSession(active.id)
+    }
+  }, [releaseCandidateSession])
+
+  useEffect(() => {
+    pickRequestRef.current += 1
+    importRequestRef.current += 1
+    const active = candidateSessionRef.current
+    if (!active || active.documentId === document?.id) return
+    candidateSessionRef.current = null
+    releaseCandidateSession(active.id)
+  }, [document?.id, releaseCandidateSession])
 
   const assets = useMemo(() => {
     if (!document) return []
@@ -196,59 +277,93 @@ export function ProjectAssetsPanel(): React.JSX.Element {
       )
   }, [deferredQuery, document, sortMode])
 
-  useEffect(() => {
-    if (!expanded || previewIndex !== null || candidates !== null || destinationOpen) return
-    const onKeyDown = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape') {
-        event.stopPropagation()
-        event.stopImmediatePropagation()
-        setExpanded(false)
-      }
-    }
-    window.addEventListener('keydown', onKeyDown, true)
-    return () => window.removeEventListener('keydown', onKeyDown, true)
-  }, [candidates, destinationOpen, expanded, previewIndex])
-
   if (!document) return <div />
   const selectedPage = document.pages.find((page) => page.id === selectedPageId)
   const currentCapacity = selectedPage ? Math.max(0, 100 - selectedPage.blocks.length) : 0
 
   const pickCandidates = async (source: 'files' | 'folder'): Promise<void> => {
+    const requestId = ++pickRequestRef.current
+    const documentId = document.id
+    setPickingRequest({ documentId, scopeGeneration: requestScope.generation })
     try {
-      const picked = await platform.assets.pickCandidates(document.id, source)
-      if (!picked || picked.length === 0) return
-      setCandidates(picked)
+      const picked = await platform.assets.pickCandidates(documentId, source)
+      if (!picked) return
+      if (
+        !mountedRef.current ||
+        requestId !== pickRequestRef.current ||
+        useStudioStore.getState().document?.id !== documentId
+      ) {
+        releaseCandidateSession(picked.id)
+        return
+      }
+      const previous = candidateSessionRef.current
+      const ownedSession = { ...picked, documentId }
+      candidateSessionRef.current = ownedSession
+      setImportError(null)
+      setCandidateSession(ownedSession)
+      if (previous) releaseCandidateSession(previous.id)
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : '选择照片失败')
+      if (mountedRef.current && requestId === pickRequestRef.current) {
+        toast.error(error instanceof Error ? error.message : '选择照片失败')
+      }
+    } finally {
+      if (mountedRef.current && requestId === pickRequestRef.current) setPickingRequest(null)
     }
   }
 
   const importSelectedCandidates = async (candidateIds: string[]): Promise<void> => {
-    setImporting(true)
-    try {
-      const result = await platform.assets.importCandidates(document.id, candidateIds)
-      if (!result) return
-      setLastSkipped(result.skipped)
-      if (result.assets.length) {
-        dispatch({ type: 'register-assets', assets: result.assets })
-        setAssetSelection(result.assets.map((asset) => asset.id))
-        toast.success(`已导入 ${result.assets.length} 张照片。`)
+    const session = candidateSessionRef.current
+    if (!session || importing) return
+    const requestId = ++importRequestRef.current
+    const documentId = document.id
+    let succeeded = false
+    setImportError(null)
+    setImportingRequest({
+      sessionId: session.id,
+      scopeGeneration: requestScope.generation
+    })
+    await trackAssetImport(async () => {
+      try {
+        const result = await platform.assets.importCandidates(documentId, session.id, candidateIds)
+        if (
+          !mountedRef.current ||
+          requestId !== importRequestRef.current ||
+          useStudioStore.getState().document?.id !== documentId ||
+          candidateSessionRef.current?.id !== session.id
+        ) {
+          return
+        }
+        if (!result) throw new Error('候选照片会话已失效，请重新选择。')
+        setLastSkipped(result.skipped)
+        if (result.assets.length) {
+          dispatch({ type: 'register-assets', assets: result.assets })
+          setAssetSelection(result.assets.map((asset) => asset.id))
+          toast.success(`已导入 ${result.assets.length} 张照片。`)
+        }
+        if (result.duplicateAssetIds.length) {
+          toast.info(`发现 ${result.duplicateAssetIds.length} 张重复照片，原图只保存一份。`)
+        }
+        if (result.skipped.length) {
+          toast.warning(`已跳过 ${result.skipped.length} 个无法读取的文件。`)
+        }
+        succeeded = true
+      } catch (error) {
+        if (mountedRef.current && requestId === importRequestRef.current) {
+          setImportError(error instanceof Error ? error.message : '导入照片失败')
+        }
+      } finally {
+        if (mountedRef.current && requestId === importRequestRef.current) {
+          setImportingRequest(null)
+          if (succeeded) finishCandidateSession(session.id)
+        }
       }
-      if (result.duplicateAssetIds.length) {
-        toast.info(`发现 ${result.duplicateAssetIds.length} 张重复照片，原图只保存一份。`)
-      }
-      if (result.skipped.length) toast.warning(`已跳过 ${result.skipped.length} 个无法读取的文件。`)
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : '导入照片失败')
-    } finally {
-      setImporting(false)
-      closeCandidatesDialog()
-    }
+    })
   }
 
   const closeCandidatesDialog = (): void => {
-    if (candidates) platform.assets.releaseCandidates(candidates.map((candidate) => candidate.id))
-    setCandidates(null)
+    if (importing) return
+    setImportError(null)
+    finishCandidateSession()
   }
 
   const relinkAsset = async (assetId: string): Promise<void> => {
@@ -270,10 +385,14 @@ export function ProjectAssetsPanel(): React.JSX.Element {
     if (!selectedPage) return
     const asset = document.assets.find((candidate) => candidate.id === assetId)
     dispatch(
-      buildAddBlockCommand(selectedPage.id, { kind: 'asset', assetId }, {
-        assetSize: asset ? { width: asset.width, height: asset.height } : undefined,
-        pageSpec: document.pageSpec
-      })
+      buildAddBlockCommand(
+        selectedPage.id,
+        { kind: 'asset', assetId },
+        {
+          assetSize: asset ? { width: asset.width, height: asset.height } : undefined,
+          pageSpec: document.pageSpec
+        }
+      )
     )
   }
 
@@ -336,51 +455,55 @@ export function ProjectAssetsPanel(): React.JSX.Element {
       )
     }))
 
-  return (
+  const panel = (
     <section
       className={cn(
-        'relative flex min-h-0 flex-col overflow-hidden bg-background',
-        expanded ? 'fixed inset-0 z-50 w-auto' : 'h-full w-[360px] max-w-full'
+        'relative flex h-full min-h-0 flex-col overflow-hidden bg-background',
+        expanded ? 'w-full' : 'w-[360px] max-w-full'
       )}
       aria-label="项目素材"
     >
       <div className="shrink-0 border-b p-3">
-        <div className="relative">
-          <SearchIcon className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
+        <InputGroup className="h-8 text-xs">
+          <InputGroupAddon>
+            <SearchIcon />
+          </InputGroupAddon>
+          <InputGroupInput
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             placeholder="搜索项目照片"
             aria-label="搜索项目照片"
-            className="h-8 pl-8 pr-8 text-xs"
+            className="text-xs"
           />
           {query ? (
-            <button
+            <InputGroupButton
               type="button"
               onClick={() => setQuery('')}
-              className="absolute right-1.5 top-1/2 -translate-y-1/2 cursor-pointer rounded p-1 text-muted-foreground hover:bg-accent"
               aria-label="清除搜索"
               title="清除搜索"
             >
               <XIcon className="size-3.5" />
-            </button>
+            </InputGroupButton>
           ) : null}
-        </div>
+        </InputGroup>
         <div className="mt-2 grid grid-cols-[1fr_auto_auto_auto] gap-1.5">
           <Select value={sortMode} onValueChange={(value) => setSortMode(value as SortMode)}>
             <SelectTrigger className="h-8 min-w-0 text-xs" aria-label="照片排序">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="name">按文件名</SelectItem>
-              <SelectItem value="imported">按导入时间</SelectItem>
+              <SelectGroup>
+                <SelectItem value="name">按文件名</SelectItem>
+                <SelectItem value="imported">按导入时间</SelectItem>
+              </SelectGroup>
             </SelectContent>
           </Select>
           <Button
+            ref={expandButtonRef}
             variant="outline"
             size="icon-sm"
             onClick={() => void pickCandidates('files')}
-            disabled={importing}
+            disabled={picking || importing}
             aria-label="选择图片"
             title="选择图片"
           >
@@ -391,7 +514,7 @@ export function ProjectAssetsPanel(): React.JSX.Element {
               variant="outline"
               size="icon-sm"
               onClick={() => void pickCandidates('folder')}
-              disabled={importing}
+              disabled={picking || importing}
               aria-label="选择照片文件夹"
               title="选择照片文件夹"
             >
@@ -433,36 +556,35 @@ export function ProjectAssetsPanel(): React.JSX.Element {
       ) : null}
 
       {document.assets.length === 0 ? (
-        <div className="grid flex-1 place-items-center p-5 text-center">
-          <div>
-            <span className="mx-auto grid size-11 place-items-center rounded-lg bg-muted">
-              <ImagesIcon className="size-5 text-muted-foreground" />
-            </span>
-            <h2 className="mt-3 text-sm font-semibold">导入项目照片</h2>
-            <p className="mt-1.5 text-xs leading-5 text-muted-foreground">
-              支持 JPEG、PNG、WebP 与 AVIF。
-            </p>
+        <Empty>
+          <EmptyMedia>
+            <ImagesIcon />
+          </EmptyMedia>
+          <EmptyTitle>导入项目照片</EmptyTitle>
+          <EmptyDescription>支持 JPEG、PNG、WebP 与 AVIF。</EmptyDescription>
+          <EmptyContent>
             <Button
-              className="mt-4"
               size="sm"
               onClick={() => void pickCandidates(canImportFolder ? 'folder' : 'files')}
-              disabled={importing}
+              disabled={picking || importing}
             >
               <ImagePlusIcon data-icon="inline-start" />
               选择照片
             </Button>
-          </div>
-        </div>
+          </EmptyContent>
+        </Empty>
       ) : assets.length === 0 ? (
-        <div className="grid flex-1 place-items-center p-5 text-center">
-          <div>
-            <SearchIcon className="mx-auto size-5 text-muted-foreground" />
-            <h2 className="mt-2 text-sm font-semibold">没有找到“{deferredQuery}”</h2>
-            <Button className="mt-3" size="sm" variant="outline" onClick={() => setQuery('')}>
+        <Empty>
+          <EmptyMedia>
+            <SearchIcon />
+          </EmptyMedia>
+          <EmptyTitle>没有找到“{deferredQuery}”</EmptyTitle>
+          <EmptyContent>
+            <Button size="sm" variant="outline" onClick={() => setQuery('')}>
               清除搜索
             </Button>
-          </div>
-        </div>
+          </EmptyContent>
+        </Empty>
       ) : (
         <div className="min-h-0 flex-1 overflow-y-auto p-3 pb-24">
           <div className="mb-2.5 flex items-center justify-between">
@@ -479,7 +601,12 @@ export function ProjectAssetsPanel(): React.JSX.Element {
             </label>
             <span className="text-[11px] text-muted-foreground">{assets.length} 张</span>
           </div>
-          <div className={cn('grid gap-2', expanded ? 'grid-cols-3 sm:grid-cols-4 lg:grid-cols-5' : 'grid-cols-2')}>
+          <div
+            className={cn(
+              'grid gap-2',
+              expanded ? 'grid-cols-3 sm:grid-cols-4 lg:grid-cols-5' : 'grid-cols-2'
+            )}
+          >
             {assets.map((asset) => (
               <ProjectAssetCard
                 key={asset.id}
@@ -524,9 +651,11 @@ export function ProjectAssetsPanel(): React.JSX.Element {
       ) : null}
 
       <ImportCandidatesDialog
-        open={candidates !== null}
-        candidates={candidates ?? []}
+        key={candidateSession?.id ?? 'closed'}
+        open={candidateSession !== null}
+        candidates={candidateSession?.candidates ?? []}
         importing={importing}
+        error={importError}
         onConfirm={(candidateIds) => void importSelectedCandidates(candidateIds)}
         onClose={closeCandidatesDialog}
       />
@@ -567,5 +696,46 @@ export function ProjectAssetsPanel(): React.JSX.Element {
         </DialogContent>
       </Dialog>
     </section>
+  )
+
+  return (
+    <Dialog
+      open={expanded}
+      onOpenChange={(open) => {
+        if (!open && !importing) setExpanded(false)
+      }}
+    >
+      {expanded ? (
+        <DialogContent
+          ref={expandedDialogRef}
+          variant="fullscreen"
+          showCloseButton={false}
+          onOpenAutoFocus={(event) => {
+            event.preventDefault()
+            expandedDialogRef.current
+              ?.querySelector<HTMLButtonElement>('[aria-label="退出全屏"]')
+              ?.focus()
+          }}
+          onCloseAutoFocus={(event) => {
+            event.preventDefault()
+            window.setTimeout(
+              () =>
+                globalThis.document
+                  .querySelector<HTMLButtonElement>('[aria-label="全屏查看素材"]')
+                  ?.focus(),
+              0
+            )
+          }}
+        >
+          <DialogTitle className="sr-only">项目素材</DialogTitle>
+          <DialogDescription className="sr-only">
+            浏览、筛选并放置当前相册中的照片。
+          </DialogDescription>
+          {panel}
+        </DialogContent>
+      ) : (
+        panel
+      )}
+    </Dialog>
   )
 }

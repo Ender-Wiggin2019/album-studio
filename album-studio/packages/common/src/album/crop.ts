@@ -1,10 +1,5 @@
 import { z } from 'zod'
-import {
-  ImageCropSchema,
-  type BlockTransform,
-  type CropArea,
-  type ImageCrop
-} from './schema'
+import { ImageCropSchema, type BlockTransform, type CropArea, type ImageCrop } from './schema'
 
 export const PixelSizeSchema = z
   .object({
@@ -33,6 +28,60 @@ export function rotatedBoundingSize(size: PixelSize, rotationDeg: number): Pixel
     width: cosine * size.width + sine * size.height,
     height: sine * size.width + cosine * size.height
   }
+}
+
+/**
+ * 计算一张完整原图为 cover 指定视口时应保留的派生图尺寸。
+ *
+ * 裁剪框定义在旋转后包围盒上，因此必须用“包围盒 × 裁剪比例”计算
+ * 真正会填满视口的像素区域。输出仍是未旋转、未裁切的完整原图，
+ * 以便编辑画布、预览与打印继续共用 `computeCropStyle`。
+ */
+export function coverImageDerivativeSize(input: {
+  sourceSize: PixelSize
+  viewportSize: PixelSize
+  crop?: ImageCrop
+  maximumPixels?: number
+}): PixelSize {
+  const sourceSize = PixelSizeSchema.parse({
+    width: input.sourceSize.width,
+    height: input.sourceSize.height
+  })
+  const viewportSize = PixelSizeSchema.parse({
+    width: input.viewportSize.width,
+    height: input.viewportSize.height
+  })
+  const crop = input.crop
+    ? ImageCropSchema.parse(input.crop)
+    : {
+        area: { x: 0, y: 0, width: 100, height: 100 },
+        rotationDeg: 0,
+        flipX: false,
+        flipY: false
+      }
+  const maximumPixels = input.maximumPixels ?? Number.POSITIVE_INFINITY
+  if (maximumPixels <= 0 || Number.isNaN(maximumPixels)) {
+    throw new Error('派生图像素上限必须是正数。')
+  }
+
+  const boundingSize = rotatedBoundingSize(sourceSize, crop.rotationDeg)
+  const visibleWidth = boundingSize.width * (crop.area.width / 100)
+  const visibleHeight = boundingSize.height * (crop.area.height / 100)
+  const coverScale = Math.max(
+    viewportSize.width / visibleWidth,
+    viewportSize.height / visibleHeight
+  )
+  const pixelLimitScale = Math.sqrt(maximumPixels / (sourceSize.width * sourceSize.height))
+  const scale = Math.min(1, coverScale, pixelLimitScale)
+
+  let width = Math.max(1, Math.round(sourceSize.width * scale))
+  let height = Math.max(1, Math.round(sourceSize.height * scale))
+  if (width * height > maximumPixels) {
+    const roundingCorrection = Math.sqrt(maximumPixels / (width * height))
+    width = Math.max(1, Math.floor(width * roundingCorrection))
+    height = Math.max(1, Math.floor(height * roundingCorrection))
+  }
+  return { width, height }
 }
 
 function pixels(value: number): string {
@@ -104,7 +153,10 @@ export function fitBlockTransformToCrop(input: {
   const { transform, pageWidthMm, pageHeightMm, assetWidth, assetHeight } = input
   if (isUnrotatedFullImage(input.area, input.rotationDeg)) return { ...transform }
 
-  const bounding = rotatedBoundingSize({ width: assetWidth, height: assetHeight }, input.rotationDeg)
+  const bounding = rotatedBoundingSize(
+    { width: assetWidth, height: assetHeight },
+    input.rotationDeg
+  )
   const cropRatio = (bounding.width * input.area.width) / (bounding.height * input.area.height)
   // Block 视觉宽高比 = (width × pageW) / (height × pageH)，令其等于裁剪区域宽高比
   const pageCoordRatio = cropRatio * (pageHeightMm / pageWidthMm)

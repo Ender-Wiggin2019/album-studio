@@ -179,7 +179,8 @@ describe('AlbumPageView', () => {
       expect(getSource).toHaveBeenCalledWith(document.id, asset.id, {
         quality: 'print',
         pageWidthRatio: 0.5,
-        pageHeightRatio: 0.4
+        pageHeightRatio: 0.4,
+        crop: page.blocks[0]?.type === 'image' ? page.blocks[0].crop : undefined
       })
     )
     expect(screen.getByAltText('旅行照片.jpg')).toHaveAttribute('loading', 'eager')
@@ -227,7 +228,19 @@ describe('AlbumPageView', () => {
     document.assets.push(asset)
     const page = createContentPage(() => 'page-erase-fallback')
     const block = createImageBlock(asset.id, TRANSFORMS.image, () => 'block-erase-fallback')
-    block.erase = { autoDetect: false, strokes: [{ mode: 'add', size: 0.05, points: [{ x: 0.5, y: 0.5 }, { x: 0.6, y: 0.5 }] }] }
+    block.erase = {
+      autoDetect: false,
+      strokes: [
+        {
+          mode: 'add',
+          size: 0.05,
+          points: [
+            { x: 0.5, y: 0.5 },
+            { x: 0.6, y: 0.5 }
+          ]
+        }
+      ]
+    }
     page.blocks.push(block)
     document.pages.push(page)
 

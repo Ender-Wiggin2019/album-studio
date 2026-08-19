@@ -1,12 +1,30 @@
 import * as React from 'react'
 import * as DialogPrimitive from '@radix-ui/react-dialog'
 import { XIcon } from 'lucide-react'
+import { cva, type VariantProps } from 'class-variance-authority'
 import { cn } from '@/shared/lib/cn'
 
 const Dialog = DialogPrimitive.Root
 const DialogTrigger = DialogPrimitive.Trigger
 const DialogClose = DialogPrimitive.Close
 const DialogPortal = DialogPrimitive.Portal
+
+const dialogContentVariants = cva(
+  'fixed z-50 overflow-hidden border bg-background shadow-xl outline-none',
+  {
+    variants: {
+      variant: {
+        default:
+          'left-1/2 top-1/2 grid max-h-[min(82dvh,760px)] w-[calc(100%-2rem)] max-w-lg grid-rows-[auto_minmax(0,1fr)_auto] -translate-x-1/2 -translate-y-1/2 gap-0 rounded-lg',
+        workspace:
+          'left-1/2 top-1/2 grid h-[min(88dvh,900px)] max-h-[min(88dvh,900px)] w-[min(1200px,calc(100vw-2rem))] max-w-none grid-rows-[minmax(0,1fr)] -translate-x-1/2 -translate-y-1/2 gap-0 rounded-lg',
+        fullscreen:
+          'inset-0 grid h-dvh max-h-none w-screen max-w-none grid-rows-[minmax(0,1fr)] gap-0 rounded-none border-0'
+      }
+    },
+    defaultVariants: { variant: 'default' }
+  }
+)
 
 function DialogOverlay({
   className,
@@ -28,19 +46,17 @@ function DialogContent({
   className,
   children,
   showCloseButton = true,
+  variant,
   ...props
 }: React.ComponentProps<typeof DialogPrimitive.Content> & {
   showCloseButton?: boolean
-}): React.JSX.Element {
+} & VariantProps<typeof dialogContentVariants>): React.JSX.Element {
   return (
     <DialogPortal>
       <DialogOverlay />
       <DialogPrimitive.Content
         data-slot="dialog-content"
-        className={cn(
-          'fixed left-1/2 top-1/2 z-50 grid max-h-[min(82dvh,760px)] w-[calc(100%-2rem)] max-w-lg grid-rows-[auto_minmax(0,1fr)_auto] -translate-x-1/2 -translate-y-1/2 gap-0 overflow-hidden rounded-xl border bg-background shadow-2xl outline-none',
-          className
-        )}
+        className={cn(dialogContentVariants({ variant }), className)}
         {...props}
       >
         {children}

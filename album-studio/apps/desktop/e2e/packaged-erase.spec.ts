@@ -1,4 +1,4 @@
-// 打包应用（dist/win-unpacked）的消除人物全流程验证：
+// 当前平台打包应用的消除人物全流程验证：
 // 证明打包态下模型从 process.resourcesPath/models 加载、修补并写入 manifest。
 // 运行：npm run test:e2e:packaged（先执行 build:unpack 生成打包产物）
 import { spawn } from 'node:child_process'
@@ -21,13 +21,17 @@ import {
   reservePort,
   terminateProcessTree
 } from '../scripts/smoke-runtime.mjs'
+import { packagedExecutableForCurrentPlatform } from './packaged-executable'
 
 const desktopRoot = resolve(__dirname, '..')
-const executable = join(desktopRoot, 'dist', 'win-unpacked', 'album-studio.exe')
+const executable = packagedExecutableForCurrentPlatform()
 const fixtureImagePath = join(desktopRoot, 'build', 'icon.png')
 const NOW = '2026-08-18T12:00:00.000Z'
 
-test.skip(!existsSync(executable), '缺少打包产物，请先运行 npm run build:unpack')
+test.skip(
+  !executable || !existsSync(executable),
+  '缺少当前平台打包产物，请先运行 npm run build:unpack'
+)
 
 test('打包应用可从资源目录加载模型并完成消除人物全流程', async () => {
   const userData = await mkdtemp(join(tmpdir(), 'album-studio-erase-package-'))
@@ -84,7 +88,7 @@ test('打包应用可从资源目录加载模型并完成消除人物全流程',
     )
 
     const port = await reservePort()
-    child = spawn(executable, [`--remote-debugging-port=${port}`, `--user-data-dir=${userData}`], {
+    child = spawn(executable!, [`--remote-debugging-port=${port}`, `--user-data-dir=${userData}`], {
       detached: true,
       env: {
         ...process.env,
@@ -105,7 +109,7 @@ test('打包应用可从资源目录加载模型并完成消除人物全流程',
     })
 
     await page.locator('#root > *').first().waitFor({ state: 'attached', timeout: 30_000 })
-    await page.getByRole('button', { name: /打包消除测试相册/ }).click()
+    await expect(page.locator('.project-identity')).toContainText('打包消除测试相册')
     await page
       .getByRole('complementary', { name: '相册页面' })
       .getByRole('button', { name: '第 1 页 · 1 个 Block', exact: true })

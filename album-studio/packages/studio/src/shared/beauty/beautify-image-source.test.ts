@@ -54,7 +54,7 @@ describe('beautifyImageSource', () => {
     stubCanvas()
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () => new Response(new Blob(['image']), { status: 200 }))
+      vi.fn(async () => new Response('image', { status: 200 }))
     )
     vi.stubGlobal('createImageBitmap', vi.fn(async () => ({ width: 2, height: 2, close: vi.fn() })))
 
@@ -72,7 +72,7 @@ describe('beautifyImageSource', () => {
     const { canvas, imageData } = stubCanvas()
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () => new Response(new Blob(['image']), { status: 200 }))
+      vi.fn(async () => new Response('image', { status: 200 }))
     )
     vi.stubGlobal('createImageBitmap', vi.fn(async () => ({ width: 2, height: 2, close: vi.fn() })))
 
@@ -84,10 +84,10 @@ describe('beautifyImageSource', () => {
     expect(URL.createObjectURL).toHaveBeenCalled()
   })
 
-  it('degrades to the original URL when canvas 2d is unavailable', async () => {
+  it('reports a processing failure when canvas 2d is unavailable', async () => {
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () => new Response(new Blob(['image']), { status: 200 }))
+      vi.fn(async () => new Response('image', { status: 200 }))
     )
     vi.stubGlobal('createImageBitmap', vi.fn(async () => ({ width: 2, height: 2, close: vi.fn() })))
     vi.stubGlobal('document', {
@@ -95,16 +95,16 @@ describe('beautifyImageSource', () => {
       createElement: vi.fn(() => ({ getContext: vi.fn(() => null) }))
     })
 
-    await expect(beautifyImageSource('album-asset://project/p/a?v=1', params)).resolves.toBe(
-      'album-asset://project/p/a?v=1'
+    await expect(beautifyImageSource('album-asset://project/p/a?v=1', params)).rejects.toThrow(
+      'Canvas 2D'
     )
   })
 
-  it('degrades to the original URL when the source cannot be loaded', async () => {
+  it('reports a processing failure when the source cannot be loaded', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(null, { status: 404 })))
 
-    await expect(beautifyImageSource('album-asset://project/p/a?v=1', params)).resolves.toBe(
-      'album-asset://project/p/a?v=1'
+    await expect(beautifyImageSource('album-asset://project/p/a?v=1', params)).rejects.toThrow(
+      '无法读取图片'
     )
   })
 

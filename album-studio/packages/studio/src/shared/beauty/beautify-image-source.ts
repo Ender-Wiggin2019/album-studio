@@ -53,7 +53,7 @@ export function canvasToBlob(canvas: HTMLCanvasElement): Promise<Blob | null> {
  * @param sourceUrl 原图 URL（桌面 album-asset: 或 Web blob:，均可被 fetch）
  * @param params 磨皮/美白/清晰度强度（全 0 时直接返回原 URL，零开销）
  * @param maxEdge 处理前的最长边上限；缺省 0 表示不缩放（保证 print 分辨率），编辑预览可传 2048
- * @returns 处理后的 blob URL；canvas 不可用或处理失败时降级返回原 URL
+ * @returns 处理后的 blob URL；参数关闭时返回原 URL，处理失败时抛出错误
  */
 export async function beautifyImageSource(
   sourceUrl: string,
@@ -70,7 +70,7 @@ export async function beautifyImageSource(
     canvas.width = width
     canvas.height = height
     const context = canvas.getContext('2d', { willReadFrequently: true })
-    if (!context) return sourceUrl
+    if (!context) throw new Error('Canvas 2D 不可用，无法处理照片。')
 
     context.drawImage(bitmap, 0, 0, width, height)
     const imageData = context.getImageData(0, 0, width, height)
@@ -80,10 +80,8 @@ export async function beautifyImageSource(
     context.putImageData(imageData, 0, 0)
 
     const blob = await canvasToBlob(canvas)
-    if (!blob) return sourceUrl
+    if (!blob) throw new Error('无法生成处理后的照片。')
     return URL.createObjectURL(blob)
-  } catch {
-    return sourceUrl
   } finally {
     bitmap?.close()
   }

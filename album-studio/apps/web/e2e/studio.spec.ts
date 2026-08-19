@@ -14,11 +14,19 @@ type IterableDirectoryHandle = FileSystemDirectoryHandle & {
 async function clearBrowserProjects(page: Page): Promise<void> {
   await page.evaluate(async () => {
     const root = await navigator.storage.getDirectory()
-    try {
-      await root.removeEntry('album-studio', { recursive: true })
-    } catch (error) {
-      if (!(error instanceof DOMException && error.name === 'NotFoundError')) throw error
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      try {
+        await root.removeEntry('album-studio', { recursive: true })
+        return
+      } catch (error) {
+        if (error instanceof DOMException && error.name === 'NotFoundError') return
+        if (!(error instanceof DOMException && error.name === 'InvalidModificationError')) {
+          throw error
+        }
+        await new Promise((resolve) => setTimeout(resolve, 25))
+      }
     }
+    throw new Error('浏览器项目目录仍被上一个文件操作占用')
   })
 }
 
@@ -49,9 +57,117 @@ function firstContentImageBlock(document: AlbumDocument): ImageBlock {
 }
 
 test.beforeEach(async ({ page }) => {
-  await page.goto('/')
+  await page.route('**/__e2e_storage__', (route) =>
+    route.fulfill({ contentType: 'text/html', body: '<!doctype html><title>E2E storage</title>' })
+  )
+  await page.goto('/__e2e_storage__')
   await clearBrowserProjects(page)
+  await page.unroute('**/__e2e_storage__')
+  await page.goto('/')
+})
+
+test('页面栏支持拖拽排序、取消、撤销重做与刷新持久化', async ({ page }) => {
+  await page.getByRole('button', { name: '新建相册' }).first().click()
+  await page.getByLabel('相册名称').fill('页面排序回归')
+  await page.getByRole('button', { name: '创建相册' }).click()
+  await expect(page.locator('.project-identity')).toContainText('页面排序回归')
+
+  await page.getByRole('button', { name: '添加页面' }).click()
+  await page.getByRole('button', { name: '添加页面' }).click()
+  await expect.poll(async () => (await readOnlyManifest(page)).pages.length).toBe(3)
+  await expect(page.locator('.page-rail')).toHaveCSS('flex-direction', 'column')
+  const originalIds = (await readOnlyManifest(page)).pages.map((albumPage) => albumPage.id)
+  const reorderedIds = [originalIds[0], originalIds[2], originalIds[1]]
+
+  const firstHandle = page.getByRole('button', { name: '拖拽排序第 1 页' })
+  const secondHandle = page.getByRole('button', { name: '拖拽排序第 2 页' })
+  const firstHandleBox = await firstHandle.boundingBox()
+  const secondItemBox = await page
+    .locator('.page-rail-item')
+    .filter({ has: secondHandle })
+    .boundingBox()
+  if (!firstHandleBox || !secondItemBox) throw new Error('无法测量页面排序手柄')
+
+  await page.mouse.move(
+    firstHandleBox.x + firstHandleBox.width / 2,
+    firstHandleBox.y + firstHandleBox.height / 2
+  )
+  await page.mouse.down()
+  await page.mouse.move(
+    firstHandleBox.x + firstHandleBox.width / 2 + 8,
+    firstHandleBox.y + firstHandleBox.height / 2 + 8,
+    { steps: 4 }
+  )
+  await expect(page.locator('.page-rail-item[data-dnd-dragging="true"]')).toHaveAttribute(
+    'data-page-id',
+    originalIds[1]
+  )
+  await page.mouse.move(
+    secondItemBox.x + secondItemBox.width / 2,
+    secondItemBox.y + secondItemBox.height * 0.9,
+    { steps: 12 }
+  )
+  // dnd-kit 先做 optimistic DOM 排序；等可见顺序真正改变再松手，
+  // 避免测试机器在最后一次 pointermove 尚未处理时就发出 pointerup。
+  await expect
+    .poll(async () =>
+      page
+        .locator('.page-rail-list > .page-rail-item:not([data-dnd-placeholder])')
+        .evaluateAll((items) => items.map((item) => (item as HTMLElement).dataset.pageId))
+    )
+    .toEqual(reorderedIds)
+  await page.mouse.up()
+
+  await expect
+    .poll(async () => (await readOnlyManifest(page)).pages.map(({ id }) => id))
+    .toEqual(reorderedIds)
+
+  await page.getByRole('button', { name: '撤销' }).click()
+  await expect
+    .poll(async () => (await readOnlyManifest(page)).pages.map(({ id }) => id))
+    .toEqual(originalIds)
+  await page.getByRole('button', { name: '重做' }).click()
+  await expect
+    .poll(async () => (await readOnlyManifest(page)).pages.map(({ id }) => id))
+    .toEqual(reorderedIds)
+
+  await expect(page.getByText('已保存', { exact: true })).toBeVisible()
   await page.reload()
+  await expect(page.locator('.project-identity')).toContainText('页面排序回归')
+  await expect
+    .poll(async () => (await readOnlyManifest(page)).pages.map(({ id }) => id))
+    .toEqual(reorderedIds)
+
+  await page.setViewportSize({ width: 800, height: 640 })
+  await expect(page.locator('.page-rail')).toHaveCSS('flex-direction', 'row')
+  await expect(page.locator('.canvas-sheet')).toHaveCSS('transition-duration', '0s')
+  await expect
+    .poll(async () => {
+      return page.evaluate(() => {
+        const sheet = document.querySelector('.canvas-sheet')?.getBoundingClientRect()
+        const rail = document.querySelector('.page-rail')?.getBoundingClientRect()
+        return sheet && rail ? sheet.bottom <= rail.top + 1 : false
+      })
+    })
+    .toBe(true)
+  const narrowHandle = page.getByRole('button', { name: '拖拽排序第 1 页' })
+  await expect(narrowHandle).toBeVisible()
+  await expect(narrowHandle).toBeEnabled()
+  const narrowHandleBox = await narrowHandle.boundingBox()
+  expect(narrowHandleBox).not.toBeNull()
+  expect(narrowHandleBox!.x).toBeGreaterThanOrEqual(0)
+  expect(narrowHandleBox!.x + narrowHandleBox!.width).toBeLessThanOrEqual(800)
+
+  await narrowHandle.focus()
+  await narrowHandle.press('Space')
+  const narrowItem = page.locator('.page-rail-item').filter({ has: narrowHandle })
+  await expect(narrowItem).toHaveAttribute('data-dragging', 'true')
+  await narrowHandle.press('ArrowRight')
+  await narrowHandle.press('Escape')
+  await expect(narrowItem).not.toHaveAttribute('data-dragging', 'true')
+  await expect
+    .poll(async () => (await readOnlyManifest(page)).pages.map(({ id }) => id))
+    .toEqual(reorderedIds)
 })
 
 test('浏览器离线版可导入、自由拖动、美化、自动保存、刷新恢复与打印', async ({ page }, testInfo) => {
@@ -339,9 +455,9 @@ test('浏览器离线版可导入、自由拖动、美化、自动保存、刷�
 
   await page.setViewportSize({ width: 800, height: 640 })
   const responsivePanel = page.getByRole('dialog', { name: '装帧托盘' })
-  if (await responsivePanel.isVisible()) {
-    await responsivePanel.getByRole('button', { name: '关闭' }).click()
-  }
+  await expect(responsivePanel).toBeVisible()
+  await responsivePanel.getByRole('button', { name: '关闭' }).click()
+  await expect(responsivePanel).not.toBeVisible()
   await page.locator('.canvas-scroll').evaluate((scrollArea) => {
     scrollArea.scrollTop = scrollArea.scrollHeight
   })

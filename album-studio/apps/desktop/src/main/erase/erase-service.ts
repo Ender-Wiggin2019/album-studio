@@ -51,22 +51,22 @@ export class EraseService {
     const asset = registration.document.assets.find((candidate) => candidate.id === request.assetId)
     if (!asset) throw new Error('要消除人物的照片不在当前项目中。')
 
-    const original = await this.images.resolve(registration.root, asset, { variant: 'original' })
     const eraseKey = eraseKeyFor(request.erase)
-
-    const auto = request.erase.autoDetect ? await this.inference.detectPersons(original) : null
-    const width = auto?.width ?? asset.width
-    const height = auto?.height ?? asset.height
-    const autoMask = auto?.mask ?? new Uint8Array(width * height)
-    const finalMask = mergeEraseMask(
-      autoMask,
-      width,
-      height,
-      request.erase.autoDetect,
-      request.erase.strokes
-    )
-    const result = await this.inference.inpaint(original, finalMask, width, height)
-    await this.images.writeErased(registration.root, asset, eraseKey, result)
-    return EraseApplyResultSchema.parse({ eraseKey, width, height })
+    await this.images.getOrCreateErased(registration.root, asset, eraseKey, async () => {
+      const original = await this.images.resolve(registration.root, asset, { variant: 'original' })
+      const auto = request.erase.autoDetect ? await this.inference.detectPersons(original) : null
+      const width = auto?.width ?? asset.width
+      const height = auto?.height ?? asset.height
+      const autoMask = auto?.mask ?? new Uint8Array(width * height)
+      const finalMask = mergeEraseMask(
+        autoMask,
+        width,
+        height,
+        request.erase.autoDetect,
+        request.erase.strokes
+      )
+      return this.inference.inpaint(original, finalMask, width, height)
+    })
+    return EraseApplyResultSchema.parse({ eraseKey, width: asset.width, height: asset.height })
   }
 }

@@ -21,16 +21,18 @@ afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })))
 })
 
-async function writePng(data: Buffer, width: number, height: number, path: string): Promise<void> {
-  await sharp(data, { raw: { width, height, channels: 3 } })
-    .png()
-    .toFile(path)
+async function writePng(
+  data: Buffer,
+  width: number,
+  height: number,
+  channels: 3 | 4,
+  path: string
+): Promise<void> {
+  await sharp(data, { raw: { width, height, channels } }).png().toFile(path)
 }
 
 describe.runIf(enabled)('EraseInferenceService real models (LaMa + composite)', () => {
-  it(
-    'inpaints a manually masked region with a plausible fill',
-    async () => {
+  it('inpaints a manually masked region with a plausible fill', async () => {
     const root = await mkdtemp(join(tmpdir(), 'album-erase-integration-'))
     roots.push(root)
     const photo = join(root, 'photo.png')
@@ -38,7 +40,8 @@ describe.runIf(enabled)('EraseInferenceService real models (LaMa + composite)', 
     const height = 600
 
     // 带噪声的灰蓝渐变背景（接近自然照片色调）+ 中央红色人形色块
-    const rgb = Buffer.alloc(width * height * 3)
+    const rgba = Buffer.alloc(width * height * 4)
+    const expectedAlpha = Buffer.alloc(width * height)
     const mask = new Uint8Array(width * height)
     let seed = 7
     const noise = (): number => {
@@ -53,19 +56,22 @@ describe.runIf(enabled)('EraseInferenceService real models (LaMa + composite)', 
             ((y - height * 0.45) / (height * 0.28)) ** 2 <=
           1
         if (inBody) {
-          rgb[i * 3] = 235
-          rgb[i * 3 + 1] = 30
-          rgb[i * 3 + 2] = 30
+          rgba[i * 4] = 235
+          rgba[i * 4 + 1] = 30
+          rgba[i * 4 + 2] = 30
           mask[i] = 255
         } else {
           const n = noise()
-          rgb[i * 3] = Math.max(0, Math.min(255, 90 + 60 * (y / height) + n))
-          rgb[i * 3 + 1] = Math.max(0, Math.min(255, 100 + 70 * (y / height) + n))
-          rgb[i * 3 + 2] = Math.max(0, Math.min(255, 120 + 80 * (y / height) + n))
+          rgba[i * 4] = Math.max(0, Math.min(255, 90 + 60 * (y / height) + n))
+          rgba[i * 4 + 1] = Math.max(0, Math.min(255, 100 + 70 * (y / height) + n))
+          rgba[i * 4 + 2] = Math.max(0, Math.min(255, 120 + 80 * (y / height) + n))
         }
+        const alpha = x < 60 ? 0 : x < 120 ? 96 : 255
+        rgba[i * 4 + 3] = alpha
+        expectedAlpha[i] = alpha
       }
     }
-    await writePng(rgb, width, height, photo)
+    await writePng(rgba, width, height, 4, photo)
 
     const service = new EraseInferenceService(modelDir)
     const result = await service.inpaint(photo, mask, width, height)
@@ -75,13 +81,14 @@ describe.runIf(enabled)('EraseInferenceService real models (LaMa + composite)', 
     expect(metadata.height).toBe(height)
 
     // 填充区应与周围背景色调接近：均值 R 明显低于原色块 235，且不为黑
-    const { data } = await sharp(result).raw().toBuffer({ resolveWithObject: true })
+    const { data, info } = await sharp(result).raw().toBuffer({ resolveWithObject: true })
+    expect(info.channels).toBe(4)
     let redSum = 0
     let count = 0
     for (let y = 0; y < height; y++) {
       for (let x = 0; x < width; x++) {
         if (mask[y * width + x] > 127) {
-          redSum += data[(y * width + x) * 3]
+          redSum += data[(y * width + x) * info.channels]
           count++
         }
       }
@@ -90,9 +97,10 @@ describe.runIf(enabled)('EraseInferenceService real models (LaMa + composite)', 
     console.log(`filled region mean red channel: ${meanRed.toFixed(1)} (blob was 235)`)
     expect(meanRed).toBeLessThan(190)
     expect(meanRed).toBeGreaterThan(30)
-    },
-    120_000
-  )
+    const actualAlpha = Buffer.alloc(width * height)
+    for (let i = 0; i < width * height; i++) actualAlpha[i] = data[i * info.channels + 3]
+    expect(actualAlpha).toEqual(expectedAlpha)
+  }, 120_000)
 })
 
 describe.runIf(enabled && Boolean(realPhoto))(

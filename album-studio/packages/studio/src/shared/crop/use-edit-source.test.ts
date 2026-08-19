@@ -1,4 +1,4 @@
-import { act, renderHook } from '@testing-library/react'
+import { act, cleanup, renderHook } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { EditSourceParams } from './edit-image-source'
 import { useEditSource } from './use-edit-source'
@@ -42,6 +42,7 @@ describe('useEditSource', () => {
   })
 
   afterEach(() => {
+    cleanup()
     vi.useRealTimers()
     vi.unstubAllGlobals()
   })
@@ -57,7 +58,7 @@ describe('useEditSource', () => {
         flipY: false
       })
     )
-    expect(result.current).toEqual({ source: SOURCE, failed: false })
+    expect(result.current).toEqual({ source: SOURCE, pending: false, failed: false })
     expect(mockedEdit).not.toHaveBeenCalled()
   })
 
@@ -74,12 +75,12 @@ describe('useEditSource', () => {
       { ...PARAMS, beautySmooth: 0, beautyWhiten: 0, clarity: 0 },
       undefined
     )
-    expect(result.current.source).toBe('blob:edited')
+    expect(result.current).toEqual({ source: 'blob:edited', pending: false, failed: false })
   })
 
   it('returns no source while the resource is still loading', () => {
     const { result } = renderHook(() => useEditSource(null, PARAMS))
-    expect(result.current).toEqual({ source: null, failed: false })
+    expect(result.current).toEqual({ source: null, pending: false, failed: false })
   })
 
   it('debounces parameter changes and renders the processed blob URL', async () => {
@@ -87,6 +88,7 @@ describe('useEditSource', () => {
 
     const { result } = renderHook(() => useEditSource(SOURCE, PARAMS))
     expect(mockedEdit).not.toHaveBeenCalled()
+    expect(result.current).toEqual({ source: SOURCE, pending: true, failed: false })
 
     await flushEdit()
     expect(mockedEdit).toHaveBeenCalledWith(SOURCE, PARAMS, undefined)
@@ -94,31 +96,37 @@ describe('useEditSource', () => {
     expect(result.current.failed).toBe(false)
   })
 
-  it('keeps the original URL when processing fails', async () => {
+  it('falls back to the original URL and exposes processing failures', async () => {
     mockedEdit.mockRejectedValue(new Error('canvas unavailable'))
 
     const { result } = renderHook(() => useEditSource(SOURCE, PARAMS))
     await flushEdit()
 
-    expect(result.current).toEqual({ source: SOURCE, failed: false })
+    expect(result.current).toEqual({
+      source: SOURCE,
+      pending: false,
+      failed: true,
+      error: expect.any(Error)
+    })
   })
 
   it('releases the previous blob URL when rotation changes', async () => {
-    mockedEdit.mockResolvedValue('blob:edited')
+    mockedEdit.mockResolvedValueOnce('blob:first').mockResolvedValueOnce('blob:second')
 
     const { result, rerender } = renderHook(
       ({ params }: { params: EditSourceParams }) => useEditSource(SOURCE, params),
       { initialProps: { params: PARAMS } }
     )
     await flushEdit()
-    expect(result.current.source).toBe('blob:edited')
+    expect(result.current.source).toBe('blob:first')
 
     rerender({ params: { ...PARAMS, rotationDeg: 90 } })
+    expect(result.current).toEqual({ source: SOURCE, pending: true, failed: false })
     await flushEdit()
 
     expect(mockedEdit).toHaveBeenCalledTimes(2)
-    expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:edited')
-    expect(result.current.source).toBe('blob:edited')
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:first')
+    expect(result.current.source).toBe('blob:second')
   })
 
   it('does not start processing for default parameters after a prior render', async () => {
@@ -141,7 +149,7 @@ describe('useEditSource', () => {
         flipY: false
       }
     })
-    expect(result.current).toEqual({ source: SOURCE, failed: false })
+    expect(result.current).toEqual({ source: SOURCE, pending: false, failed: false })
     expect(mockedEdit).toHaveBeenCalledTimes(1)
   })
 })

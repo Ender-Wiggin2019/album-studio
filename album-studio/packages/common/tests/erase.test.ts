@@ -1,10 +1,17 @@
 import { describe, expect, it } from 'vitest'
-import { eraseKeyFor, type ImageErase } from '../src'
+import { ERASE_PIPELINE_VERSION, eraseKeyFor, type ImageErase } from '../src'
 
 const BASE: ImageErase = {
   autoDetect: true,
   strokes: [
-    { mode: 'add', size: 0.04, points: [{ x: 0.5, y: 0.5 }, { x: 0.55, y: 0.6 }] }
+    {
+      mode: 'add',
+      size: 0.04,
+      points: [
+        { x: 0.5, y: 0.5 },
+        { x: 0.55, y: 0.6 }
+      ]
+    }
   ]
 }
 
@@ -16,6 +23,7 @@ describe('eraseKeyFor', () => {
       autoDetect: BASE.autoDetect
     })
     expect(first).toBe(reordered)
+    expect(first).toMatch(new RegExp(`^e${ERASE_PIPELINE_VERSION}`))
     expect(first).toMatch(/^[0-9a-z]+$/)
   })
 
@@ -33,7 +41,14 @@ describe('eraseKeyFor', () => {
         autoDetect: true,
         strokes: [
           BASE.strokes[0],
-          { mode: 'subtract', size: 0.03, points: [{ x: 0.1, y: 0.1 }, { x: 0.2, y: 0.2 }] }
+          {
+            mode: 'subtract',
+            size: 0.03,
+            points: [
+              { x: 0.1, y: 0.1 },
+              { x: 0.2, y: 0.2 }
+            ]
+          }
         ]
       })
     ).not.toBe(base)

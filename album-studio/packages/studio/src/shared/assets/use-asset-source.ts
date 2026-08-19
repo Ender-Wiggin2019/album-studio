@@ -23,9 +23,20 @@ export function useAssetSource(
     ...INITIAL_STATE,
     requestKey: ''
   })
-  const { quality, pageWidthRatio, pageHeightRatio, eraseKey } = request
+  const { quality, pageWidthRatio, pageHeightRatio, crop, eraseKey } = request
+  const cropKey = crop
+    ? JSON.stringify([
+        crop.area.x,
+        crop.area.y,
+        crop.area.width,
+        crop.area.height,
+        crop.rotationDeg,
+        crop.flipX,
+        crop.flipY
+      ])
+    : ''
   const requestKey = assetId
-    ? `${documentId}:${assetId}:${quality}:${pageWidthRatio ?? ''}:${pageHeightRatio ?? ''}:${eraseKey ?? ''}`
+    ? `${documentId}:${assetId}:${quality}:${pageWidthRatio ?? ''}:${pageHeightRatio ?? ''}:${cropKey}:${eraseKey ?? ''}`
     : ''
 
   useEffect(() => {
@@ -39,6 +50,7 @@ export function useAssetSource(
         quality,
         pageWidthRatio,
         pageHeightRatio,
+        crop,
         eraseKey
       })
       .then((nextSource) => {
@@ -56,6 +68,8 @@ export function useAssetSource(
     }
   }, [
     assetId,
+    crop,
+    cropKey,
     documentId,
     eraseKey,
     pageHeightRatio,

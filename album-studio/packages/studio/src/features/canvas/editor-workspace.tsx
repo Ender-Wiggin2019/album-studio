@@ -16,6 +16,8 @@ import { useAlbumPageDropTarget } from '@/features/block-placement/use-album-pag
 import { RightPanel } from '@/features/inspector/right-panel'
 import { PageRail } from '@/features/pages/page-rail'
 import { useMediaQuery } from '@/shared/dom/use-media-query'
+import { fitAspectRatioWithin } from '@/shared/geometry/fit-aspect-ratio'
+import { useElementContentSize } from '@/shared/geometry/use-element-content-size'
 import { AlbumPageView } from './album-page-view'
 
 const PAGE_SPEC_NAMES = {
@@ -52,9 +54,10 @@ export function EditorWorkspace(): React.JSX.Element {
   const dispatch = useStudioStore((state) => state.dispatch)
   const markAssetMissing = useStudioStore((state) => state.markAssetMissing)
   const sheetRef = useRef<HTMLDivElement>(null)
-  const scrollRef = useRef<HTMLDivElement>(null)
   const gestureRef = useRef<BlockTransform | null>(null)
-  const [zoom, setZoom] = useState(0.75)
+  const [zoom, setZoom] = useState(1)
+  const [scrollElement, setScrollElement] = useState<HTMLDivElement | null>(null)
+  const availableCanvasSize = useElementContentSize(scrollElement)
   const page =
     document?.pages.find((candidate) => candidate.id === selectedPageId) ?? document?.pages[0]
   const { ref: dropTargetRef, isDropTarget } = useAlbumPageDropTarget(page?.id ?? 'inactive-page')
@@ -62,6 +65,15 @@ export function EditorWorkspace(): React.JSX.Element {
   const block = selectedBlockId
     ? page?.blocks.find((candidate) => candidate.id === selectedBlockId)
     : undefined
+  const fittedPageSize =
+    document && availableCanvasSize
+      ? fitAspectRatioWithin({
+          aspectRatio: document.pageSpec.widthMm / document.pageSpec.heightMm,
+          availableWidth: availableCanvasSize.width,
+          availableHeight: availableCanvasSize.height,
+          maxWidth: 1_100
+        })
+      : null
 
   const setCanvasSheetRef = useCallback(
     (element: HTMLDivElement | null): void => {
@@ -86,19 +98,7 @@ export function EditorWorkspace(): React.JSX.Element {
   }
 
   const fitToWindow = (): void => {
-    const sheet = sheetRef.current
-    const scroll = scrollRef.current
-    if (!sheet || !scroll) return
-    const sheetBounds = sheet.getBoundingClientRect()
-    if (sheetBounds.width <= 0 || sheetBounds.height <= 0) return
-    const style = getComputedStyle(scroll)
-    const padX = parseFloat(style.paddingLeft) + parseFloat(style.paddingRight)
-    const padY = parseFloat(style.paddingTop) + parseFloat(style.paddingBottom)
-    const fit = Math.min(
-      (scroll.clientWidth - padX) / sheetBounds.width,
-      (scroll.clientHeight - padY) / sheetBounds.height
-    )
-    setZoom(Math.min(1.5, Math.max(0.42, fit)))
+    setZoom(1)
   }
 
   const previewTransform = (target: HTMLElement | SVGElement, next: BlockTransform): void => {
@@ -155,12 +155,7 @@ export function EditorWorkspace(): React.JSX.Element {
             >
               <PlusIcon />
             </Button>
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              onClick={fitToWindow}
-              aria-label="适合窗口"
-            >
+            <Button variant="ghost" size="icon-sm" onClick={fitToWindow} aria-label="适合窗口">
               <Maximize2Icon />
             </Button>
             {!widePanel ? (
@@ -190,7 +185,7 @@ export function EditorWorkspace(): React.JSX.Element {
           </div>
         </div>
         <div
-          ref={scrollRef}
+          ref={setScrollElement}
           className="canvas-scroll"
           onPointerDown={(event) => {
             if (event.target === event.currentTarget) clearBlockSelection()
@@ -200,7 +195,10 @@ export function EditorWorkspace(): React.JSX.Element {
             ref={setCanvasSheetRef}
             className="canvas-sheet"
             data-drop-target={isDropTarget || undefined}
-            style={{ width: `${zoom * 94}%` }}
+            style={{
+              width: fittedPageSize ? `${fittedPageSize.width * zoom}px` : 'min(94%, 1100px)',
+              visibility: fittedPageSize ? undefined : 'hidden'
+            }}
             onPointerDown={(event) => {
               if (
                 event.target instanceof Element &&

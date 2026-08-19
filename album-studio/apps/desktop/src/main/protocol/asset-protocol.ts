@@ -1,4 +1,4 @@
-import { IMAGE_PIPELINE_VERSION } from '@album-studio/common'
+import { IMAGE_PIPELINE_VERSION, ImageCropSchema, type ImageCrop } from '@album-studio/common'
 import { net, protocol } from 'electron'
 import { extname } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -8,7 +8,7 @@ export type AssetProtocolVariantRequest =
   | Exclude<ImageVariantRequest, { variant: 'print' | 'erased' }>
   | {
       variant: 'print'
-      usage?: { widthFraction: number; heightFraction: number }
+      usage?: { widthFraction: number; heightFraction: number; crop?: ImageCrop }
     }
   | {
       variant: 'erased'
@@ -41,10 +41,17 @@ function notFound(): Response {
   })
 }
 
-function parseUsage(url: URL): { widthFraction: number; heightFraction: number } | undefined {
+function hasPrintUsage(url: URL): boolean {
+  return ['width', 'height', 'crop'].some((name) => url.searchParams.has(name))
+}
+
+function parseUsage(
+  url: URL
+): { widthFraction: number; heightFraction: number; crop?: ImageCrop } | undefined {
   const widthValue = url.searchParams.get('width')
   const heightValue = url.searchParams.get('height')
-  if (widthValue === null && heightValue === null) return undefined
+  const cropValue = url.searchParams.get('crop')
+  if (widthValue === null && heightValue === null && cropValue === null) return undefined
   if (widthValue === null || heightValue === null) throw new Error('打印尺寸参数不完整。')
   const widthFraction = Number(widthValue)
   const heightFraction = Number(heightValue)
@@ -58,7 +65,8 @@ function parseUsage(url: URL): { widthFraction: number; heightFraction: number }
   ) {
     throw new Error('打印尺寸参数无效。')
   }
-  return { widthFraction, heightFraction }
+  const crop = cropValue === null ? undefined : ImageCropSchema.parse(JSON.parse(cropValue))
+  return { widthFraction, heightFraction, crop }
 }
 
 export function parseAssetProtocolRequest(requestUrl: string): ParsedAssetProtocolRequest {
@@ -79,19 +87,19 @@ export function parseAssetProtocolRequest(requestUrl: string): ParsedAssetProtoc
   }
   const quality = url.searchParams.get('quality') ?? 'preview'
   if (quality === 'original') {
-    if (url.searchParams.has('width') || url.searchParams.has('height')) {
+    if (hasPrintUsage(url)) {
       throw new Error('原图请求不能包含打印尺寸。')
     }
     return { projectId, assetId, variant: { variant: 'original' } }
   }
   if (quality === 'preview') {
-    if (url.searchParams.has('width') || url.searchParams.has('height')) {
+    if (hasPrintUsage(url)) {
       throw new Error('预览图请求不能包含打印尺寸。')
     }
     return { projectId, assetId, variant: { variant: 'preview' } }
   }
   if (quality === 'thumbnail') {
-    if (url.searchParams.has('width') || url.searchParams.has('height')) {
+    if (hasPrintUsage(url)) {
       throw new Error('缩略图请求不能包含打印尺寸。')
     }
     return { projectId, assetId, variant: { variant: 'thumbnail' } }
@@ -108,7 +116,7 @@ export function parseAssetProtocolRequest(requestUrl: string): ParsedAssetProtoc
     if (eraseKey === null || !/^[0-9a-z]{4,64}$/.test(eraseKey)) {
       throw new Error('消除结果键无效。')
     }
-    if (url.searchParams.has('width') || url.searchParams.has('height')) {
+    if (hasPrintUsage(url)) {
       throw new Error('消除结果请求不能包含打印尺寸。')
     }
     return { projectId, assetId, variant: { variant: 'erased', usage: { eraseKey } } }

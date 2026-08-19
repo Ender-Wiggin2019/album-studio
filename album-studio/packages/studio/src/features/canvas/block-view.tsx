@@ -20,7 +20,8 @@ export function BlockView({
   selected = false,
   interactive = false,
   onSelect,
-  onSourceError
+  onSourceError,
+  onPrintReadinessChange
 }: {
   document: AlbumDocument
   block: Block
@@ -29,6 +30,7 @@ export function BlockView({
   interactive?: boolean
   onSelect?: () => void
   onSourceError?: () => void
+  onPrintReadinessChange?: (state: 'pending' | 'ready' | 'fallback') => void
 }): React.JSX.Element {
   return (
     <div
@@ -63,6 +65,7 @@ export function BlockView({
           block={block}
           quality={quality}
           onSourceError={onSourceError}
+          onPrintReadinessChange={onPrintReadinessChange}
         />
       ) : block.type === 'rich-text' ? (
         <RichTextBlockView document={block.document} />

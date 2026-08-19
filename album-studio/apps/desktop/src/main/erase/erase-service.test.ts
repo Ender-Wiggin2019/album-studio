@@ -47,14 +47,19 @@ function fakeProjects(document: AlbumDocument): ProjectRepository {
 function fakeImages(): {
   images: ImageStore
   resolve: ReturnType<typeof vi.fn>
-  writeErased: ReturnType<typeof vi.fn>
+  getOrCreateErased: ReturnType<typeof vi.fn>
 } {
   const resolve = vi.fn(async () => '/project-root/assets/original/original.jpg')
-  const writeErased = vi.fn(async () => '/project-root/erased.webp')
+  const getOrCreateErased = vi.fn(
+    async (_root, _asset, _eraseKey, createImage: () => Promise<Buffer>) => {
+      await createImage()
+      return '/project-root/erased.webp'
+    }
+  )
   return {
-    images: { resolve, writeErased } as unknown as ImageStore,
+    images: { resolve, getOrCreateErased } as unknown as ImageStore,
     resolve,
-    writeErased
+    getOrCreateErased
   }
 }
 
@@ -106,7 +111,7 @@ describe('EraseService', () => {
   it('applies erase: merges mask, inpaints, writes cache and returns eraseKey', async () => {
     const document = documentWithAsset()
     const projects = fakeProjects(document)
-    const { images, writeErased } = fakeImages()
+    const { images, getOrCreateErased } = fakeImages()
     const { inference, inpaint } = fakeInference()
     const service = new EraseService(projects, images, inference)
     const erase: ImageErase = {
@@ -138,11 +143,11 @@ describe('EraseService', () => {
     // 自动遮罩被笔划合并（全程 255 的自动遮罩仍为 255）
     const mask = inpaint.mock.calls[0][1] as Uint8Array
     expect(mask[240 * 640 + 320]).toBe(255)
-    expect(writeErased).toHaveBeenCalledWith(
+    expect(getOrCreateErased).toHaveBeenCalledWith(
       '/project-root',
       expect.objectContaining({ id: 'asset-1' }),
       result.eraseKey,
-      Buffer.from('webp-bytes')
+      expect.any(Function)
     )
   })
 
@@ -170,6 +175,24 @@ describe('EraseService', () => {
     const mask = inpaint.mock.calls[0][1] as Uint8Array
     expect(mask[240 * 640 + 320]).toBe(255) // 笔划位置
     expect(mask[0]).toBe(0) // 其余为 0
+  })
+
+  it('skips original decoding and inference when the erased cache already exists', async () => {
+    const projects = fakeProjects(documentWithAsset())
+    const { images, resolve, getOrCreateErased } = fakeImages()
+    const { inference, detectPersons, inpaint } = fakeInference()
+    getOrCreateErased.mockResolvedValue('/project-root/erased.webp')
+    const service = new EraseService(projects, images, inference)
+
+    await service.apply({
+      projectPath: '/project-root',
+      assetId: 'asset-1',
+      erase: { autoDetect: true, strokes: [] }
+    })
+
+    expect(resolve).not.toHaveBeenCalled()
+    expect(detectPersons).not.toHaveBeenCalled()
+    expect(inpaint).not.toHaveBeenCalled()
   })
 
   it('rejects assets that are not in the current project', async () => {

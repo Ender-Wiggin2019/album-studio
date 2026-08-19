@@ -8,7 +8,7 @@ import { createHash } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { join } from 'node:path'
 import { expect, test } from '@playwright/test'
 import sharp from 'sharp'
 import {
@@ -24,12 +24,15 @@ import {
   reservePort,
   terminateProcessTree
 } from '../scripts/smoke-runtime.mjs'
+import { packagedExecutableForCurrentPlatform } from './packaged-executable'
 
-const desktopRoot = resolve(__dirname, '..')
-const executable = join(desktopRoot, 'dist', 'win-unpacked', 'album-studio.exe')
+const executable = packagedExecutableForCurrentPlatform()
 const NOW = '2026-08-18T12:00:00.000Z'
 
-test.skip(!existsSync(executable), '缺少打包产物，请先运行 npm run build:unpack')
+test.skip(
+  !executable || !existsSync(executable),
+  '缺少当前平台打包产物，请先运行 npm run build:unpack'
+)
 
 test('涂刷笔划与鼠标位置一致（回归）', async () => {
   const userData = await mkdtemp(join(tmpdir(), 'album-studio-brush-align-'))
@@ -91,7 +94,7 @@ test('涂刷笔划与鼠标位置一致（回归）', async () => {
     )
 
     const port = await reservePort()
-    child = spawn(executable, [`--remote-debugging-port=${port}`, `--user-data-dir=${userData}`], {
+    child = spawn(executable!, [`--remote-debugging-port=${port}`, `--user-data-dir=${userData}`], {
       detached: true,
       env: {
         ...process.env,
@@ -112,7 +115,7 @@ test('涂刷笔划与鼠标位置一致（回归）', async () => {
     })
 
     await page.locator('#root > *').first().waitFor({ state: 'attached', timeout: 30_000 })
-    await page.getByRole('button', { name: /涂刷对齐测试相册/ }).click()
+    await expect(page.locator('.project-identity')).toContainText('涂刷对齐测试相册')
     await page
       .getByRole('complementary', { name: '相册页面' })
       .getByRole('button', { name: '第 1 页 · 1 个 Block', exact: true })

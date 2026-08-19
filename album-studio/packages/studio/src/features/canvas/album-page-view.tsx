@@ -1,6 +1,14 @@
 import type { AlbumDocument, AlbumPage, RichTextDocument } from '@album-studio/common'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { AssetQuality } from '@/app/platform/studio-platform'
 import { BlockView } from './block-view'
+
+type PrintImageState = 'pending' | 'ready' | 'fallback'
+
+export type PrintBookReadyResult = Readonly<{
+  totalImages: number
+  fallbackCount: number
+}>
 
 export function AlbumPageView({
   document,
@@ -11,7 +19,8 @@ export function AlbumPageView({
   quality = 'preview',
   richTextDraft,
   onSelectBlock,
-  onSourceError
+  onSourceError,
+  onPrintImageStateChange
 }: {
   document: AlbumDocument
   page: AlbumPage
@@ -26,6 +35,7 @@ export function AlbumPageView({
   }> | null
   onSelectBlock?: (blockId: string) => void
   onSourceError?: (blockId: string) => void
+  onPrintImageStateChange?: (imageId: string, state: PrintImageState) => void
 }): React.JSX.Element {
   return (
     <div className="album-document" data-album-theme={document.themeId}>
@@ -52,6 +62,11 @@ export function AlbumPageView({
               interactive={interactive}
               onSelect={() => onSelectBlock?.(block.id)}
               onSourceError={() => onSourceError?.(block.id)}
+              onPrintReadinessChange={
+                block.type === 'image'
+                  ? (state) => onPrintImageStateChange?.(`${page.id}:${block.id}`, state)
+                  : undefined
+              }
             />
           )
         })}
@@ -61,9 +76,41 @@ export function AlbumPageView({
   )
 }
 
-export function PrintBook({ document }: { document: AlbumDocument }): React.JSX.Element {
+export function PrintBook({
+  document,
+  onReady
+}: {
+  document: AlbumDocument
+  onReady?: (result: PrintBookReadyResult) => void
+}): React.JSX.Element {
   const pageWidth = `${document.pageSpec.widthMm}mm`
   const pageHeight = `${document.pageSpec.heightMm}mm`
+  const imageIds = document.pages.flatMap((page) =>
+    page.blocks.flatMap((block) => (block.type === 'image' ? [`${page.id}:${block.id}`] : []))
+  )
+  const statesRef = useRef<Map<string, PrintImageState>>(
+    new Map(imageIds.map((imageId) => [imageId, 'pending']))
+  )
+  const readyReportedRef = useRef(false)
+  const [stateVersion, setStateVersion] = useState(0)
+
+  const reportImageState = useCallback((imageId: string, state: PrintImageState) => {
+    if (!statesRef.current.has(imageId) || statesRef.current.get(imageId) === state) return
+    statesRef.current.set(imageId, state)
+    setStateVersion((version) => version + 1)
+  }, [])
+
+  useEffect(() => {
+    if (readyReportedRef.current) return
+    const states = [...statesRef.current.values()]
+    if (states.some((state) => state === 'pending')) return
+    readyReportedRef.current = true
+    onReady?.({
+      totalImages: states.length,
+      fallbackCount: states.filter((state) => state === 'fallback').length
+    })
+  }, [onReady, stateVersion])
+
   return (
     <div
       className="print-book"
@@ -80,7 +127,12 @@ export function PrintBook({ document }: { document: AlbumDocument }): React.JSX.
       >{`@page { size: ${pageWidth} ${pageHeight}; margin: 0; }`}</style>
       {document.pages.map((page) => (
         <div className="print-page" key={page.id}>
-          <AlbumPageView document={document} page={page} quality="print" />
+          <AlbumPageView
+            document={document}
+            page={page}
+            quality="print"
+            onPrintImageStateChange={reportImageState}
+          />
         </div>
       ))}
     </div>

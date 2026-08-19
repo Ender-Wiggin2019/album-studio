@@ -144,6 +144,23 @@ describe('studio command store', () => {
     })
   })
 
+  it.each(['preview', 'image-edit', 'erase-people'] as const)(
+    'closes the narrow-screen panel before opening the %s workspace',
+    (workspace) => {
+      const { pageId, block } = coverTextBlock()
+      const store = useStudioStore.getState()
+      store.selectBlock(pageId, block.id)
+      expect(useStudioStore.getState().rightPanelSheetOpen).toBe(true)
+
+      store.setExclusiveWorkspace(workspace)
+
+      expect(useStudioStore.getState()).toMatchObject({
+        exclusiveWorkspace: workspace,
+        rightPanelSheetOpen: false
+      })
+    }
+  )
+
   it('merges continuous rich-text drafts into one command after the idle window', () => {
     vi.useFakeTimers()
     const { pageId, block } = coverTextBlock()

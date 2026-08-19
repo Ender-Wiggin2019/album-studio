@@ -7,9 +7,9 @@ import {
   type TextStyle
 } from '@album-studio/common'
 import { ImageOffIcon } from 'lucide-react'
-import { useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { AssetQuality } from '@/app/platform/studio-platform'
-import { AssetImage } from '@/shared/assets/asset-image'
+import { AssetImage, type AssetImageReadiness } from '@/shared/assets/asset-image'
 import { useElementSize } from '@/shared/dom/use-element-size'
 
 const CAPTION_FONT_FAMILY_CSS: Readonly<Record<TextStyle['fontFamily'], string>> = Object.freeze({
@@ -34,12 +34,14 @@ export function ImageBlockView({
   document,
   block,
   quality = 'preview',
-  onSourceError
+  onSourceError,
+  onPrintReadinessChange
 }: {
   document: AlbumDocument
   block: ImageBlock
   quality?: AssetQuality
   onSourceError?: () => void
+  onPrintReadinessChange?: (state: 'pending' | 'ready' | 'fallback') => void
 }): React.JSX.Element {
   const viewportRef = useRef<HTMLDivElement>(null)
   const viewportSize = useElementSize(viewportRef)
@@ -60,18 +62,41 @@ export function ImageBlockView({
   }
   const usesErased = block.erase !== undefined && !erasedUnavailable
 
-  const sourceRequest = usesErased && block.erase
-    ? {
-        quality: 'erased' as const,
-        eraseKey: eraseKeyFor(block.erase),
-        pageWidthRatio: block.transform.width,
-        pageHeightRatio: block.transform.height
+  useEffect(() => {
+    if (quality !== 'print' || asset) return
+    onPrintReadinessChange?.('fallback')
+  }, [asset, onPrintReadinessChange, quality])
+
+  const handleReadinessChange = useCallback(
+    (readiness: AssetImageReadiness): void => {
+      if (readiness.status === 'pending') {
+        onPrintReadinessChange?.('pending')
+        return
       }
-    : {
-        quality,
-        pageWidthRatio: block.transform.width,
-        pageHeightRatio: block.transform.height
+      if (readiness.status === 'ready') {
+        onPrintReadinessChange?.(readiness.fallback ? 'fallback' : 'ready')
+        return
       }
+      // An erased cache miss remounts the same Block with its base print source.
+      onPrintReadinessChange?.(usesErased ? 'pending' : 'fallback')
+    },
+    [onPrintReadinessChange, usesErased]
+  )
+
+  const sourceRequest =
+    usesErased && block.erase
+      ? {
+          quality: 'erased' as const,
+          eraseKey: eraseKeyFor(block.erase),
+          pageWidthRatio: block.transform.width,
+          pageHeightRatio: block.transform.height
+        }
+      : {
+          quality,
+          pageWidthRatio: block.transform.width,
+          pageHeightRatio: block.transform.height,
+          crop: quality === 'print' ? block.crop : undefined
+        }
 
   return (
     <div className="album-image-block-content">
@@ -82,6 +107,8 @@ export function ImageBlockView({
             assetId={asset.id}
             sourceRequest={sourceRequest}
             beautify={block.effects}
+            beautyMaxEdge={quality === 'print' ? 0 : 2048}
+            onReadinessChange={quality === 'print' ? handleReadinessChange : undefined}
             alt={block.caption.text || asset.fileName}
             draggable={false}
             decoding="async"
