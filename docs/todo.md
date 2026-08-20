@@ -532,7 +532,7 @@ Electron 构建配置现在显式指定 `build/icon.ico` 和 `build/icon.icns`�
 
 ## 当前任务：将软件品牌更新为「咔宝」
 
-> 状态：实施中
+> 状态：已完成
 >
 > 建立日期：2026-08-20
 
@@ -550,8 +550,16 @@ Electron 构建配置现在显式指定 `build/icon.ico` 和 `build/icon.icns`�
 - [x] 在共享品牌模块建立唯一的页面品牌名与 Slogan，更新项目首页、Studio 顶栏和可访问名称，并补组件回归。
 - [x] 更新桌面/Web HTML 标题、桌面窗口与开发态应用名、启动/错误日志、electron-builder 产品名和跨平台产物路径。
 - [x] 同步 package 描述、README、用户指南、设计/实施文档和项目开发 Skill；历史架构 ID 与技术目录不改名。
-- [ ] 运行定向测试、`npm run check`、运行中桌面版与 Web 三视口视觉检查，并生成 macOS unpacked 应用验证 `咔宝.app` 和包内标题。
-- [ ] 搜索旧品牌字符串，区分应删除的当前名称与允许保留的历史/通用描述，完成后补 Review。
+- [x] 运行定向测试、`npm run check`、运行中桌面版与 Web 三视口视觉检查，并生成 macOS unpacked 应用验证 `咔宝.app` 和包内标题。
+- [x] 搜索旧品牌字符串，区分应删除的当前名称与允许保留的历史/通用描述，完成后补 Review。
+
+### Review
+
+共享品牌模块现在统一提供「咔宝」与「咔宝——翻阅时光记忆。」；首页只展示一次完整 Slogan，并在首页 40px、Studio 32px 两个场景复用 A2 核心 Logo。桌面窗口、浏览器标题、启动/错误提示、README 与当前用户文档均已同步。`com.albumstudio.desktop`、npm 包名、环境变量与项目格式继续保留；Windows 产物使用 `kabo`，macOS 使用 `咔宝.app`。
+
+`npm run check` 完整通过：Common 96/96、Studio 217/217、Desktop 80/80（另 3 项环境跳过）、Node 脚本 14/14、双端 production build、Electron dev smoke 和 Web E2E 8/8 均通过。lint 为 0 error，仍报告工作区既有的 Prettier warning；Rollup 仍有既有的大 chunk warning。真实 Chromium 在 1440×900、1100×720、800×640 三档确认无横向溢出，Logo 原图均为 256×256，控制台与页面错误均为 0。
+
+macOS unpacked 产物和实际启动冒烟通过：`咔宝.app/Contents/MacOS/咔宝` 为 arm64 Mach-O，Info.plist 的 Name、DisplayName 与 Executable 均为「咔宝」，Bundle ID 仍为 `com.albumstudio.desktop`，包内使用新的 `icon.icns`。Windows 真实安装包未在 macOS 上生成，但对应文件名、图标与 electron-builder 配置均有静态回归。开发态咔宝已启动并保持运行。
 
 ---
 
