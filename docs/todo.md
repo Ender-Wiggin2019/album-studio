@@ -598,7 +598,7 @@ macOS unpacked 产物和实际启动冒烟通过：`咔宝.app/Contents/MacOS/�
 
 ## 当前任务：支持富文本横排与竖排
 
-> 状态：实施与验证中
+> 状态：已完成
 >
 > 建立日期：2026-08-20
 
@@ -617,4 +617,12 @@ macOS unpacked 产物和实际启动冒烟通过：`咔宝.app/Contents/MacOS/�
 - [x] 阶段 2：在 common 中为 `RichTextBlock` 增加严格的 Block 级方向字段和单一命令，新建文字默认横排，复制、解析、保存、撤销/重做保留方向。
 - [x] 阶段 3：在共享文字编辑面板增加方向切换；切换前提交未失焦的文字草稿，然后立即保存方向。竖排时编辑区同步竖排，对齐语义显示为顶部/居中/底部。
 - [x] 阶段 4：让共享 `RichTextBlockView` 按 Block 方向渲染，竖排使用从右向左的真实排版；检查画布、缩略图、整册预览与打印/PDF 没有分支或样式漂移。
-- [ ] 阶段 5：运行 common/Studio 定向测试、Web 真实操作回归、`npm run check` 和 Electron E2E；在 1440×900、1100×720、800×640 检查横竖切换、长中文、中英数混排、保存重开、撤销/重做与打印输出，完成后补 Review。
+- [x] 阶段 5：运行 common/Studio 定向测试、Web 真实操作回归、`npm run check` 和 Electron E2E；在 1440×900、1100×720、800×640 检查横竖切换、长中文、中英数混排、保存重开、撤销/重做与打印输出，完成后补 Review。
+
+### Review
+
+富文本现在以 Block 级 `writingMode` 保存横排或竖排，新建文字默认横排；旧 v2 项目缺少该字段时自动补为横排，非法值仍会被严格拒绝。方向切换使用独立命令，因此 revision、撤销、重做、复制、自动保存和刷新恢复保持一致；切换方向前会先提交仍未失焦的文字草稿，不会丢字。
+
+右侧文字编辑面板新增“横排 / 竖排”。竖排使用真实的 `vertical-rl` 与 `upright` 排版，文字从上到下、列从右到左，中英文和数字均保持直立；对齐按钮同步显示顶部、居中和底部语义。编辑区、画布、页面缩略图、整册预览和打印/PDF 都复用同一套方向映射与 `AlbumPageView → BlockView → RichTextBlockView` 渲染链。竖排编辑区固定在面板宽度内，长内容在编辑区自身横向滚动，不会撑宽页面。
+
+最终 `npm run check` 完整通过：lint 0 error（保留 36 个既有 Prettier warning）、四个 workspace typecheck、Common 96/96、Studio 217/217、Desktop Vitest 80/80（另 3 项环境跳过）、Node 脚本 14/14、双端 production build、桌面开发 smoke 与 Web E2E 8/8。Electron E2E 4/4 另行通过。真实 Chromium 检查覆盖 1440×900、1100×720、800×640 的长中文和中英数混排；三个视口都没有页面横向溢出或控制台错误，竖排编辑区宽度分别收敛到 325px/344px/344px，画布与整册预览均为 `vertical-rl` / `upright`。
