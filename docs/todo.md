@@ -490,11 +490,11 @@ A4 竖排页面栏通过 PageSpec 方向使用紧凑缩略图，1440×900、1100
 
 ### Review
 
-六张正式候选与所有重试稿均已保存到 `assets/branding/logo-concepts/2026-08-19/`。生成使用 Codex 内置 ImageGen；运行时没有公开具体 provider/model，约束通过单一主提示词传递。六张均无参考图、互不引用，服务原生输出 1254 × 1254 PNG，未重采样。A1、A2、B1、B2、C2 为不透明 RGB；C1 为允许保留的透明 RGBA 变体。
+六张候选及必要重试均已完成检查，用户最终选择 A2。候选图、重试图和生成过程记录属于一次性设计工件，正式 Logo 接入后不再保留在产品源码树中。
 
 六张都完成原尺寸目视检查与 32 × 32 缩略检查。B1/B2 的翻页轮廓与小尺寸辨识度最均衡，适合作为下一轮优先精修方向；A1/A2 更像传统应用图标，但照片相册身份较弱；C2 有设备/屏幕歧义；C1 因四肢、强立体感和复杂度超限明确标为非推荐。除 C1 外，其他正式稿也都有轻微背景明暗漂移或相册身份偏差，因此本轮不直接替换应用现有图标。
 
-逐张方向、配色、尺寸、背景模式、SHA-256、32 × 32 结果与剩余偏差记录在 `generation-report.md`；最终提示词和约束传递方式记录在 `generation-prompts.txt`。PNG 文件属性检查、`git diff --check -- docs/todo.md` 均通过。
+最终仓库只保留正式母版、应用实际使用的派生图标和必要的品牌实现，不保留候选截图与生成日志。
 
 ---
 
@@ -522,7 +522,7 @@ A4 竖排页面栏通过 PageSpec 方向使用紧凑缩略图，1440×900、1100
 
 ### Review
 
-用户最终选定的 A2 已精修为 1254 × 1254 不透明 RGB 母版 `assets/branding/album-studio-logo-master.png`，并从同一母版派生 1024px 构建 PNG、512px 运行时 PNG、macOS ICNS、包含 7 档尺寸的 Windows ICO，以及共享页面使用的 256px PNG。32 × 32 检查中笑脸、水绿封面和右侧李紫书脊仍清楚。ImageGen 仍留下轻微黄色背景明暗变化与内部色调变化，没有用代码静默修图；完整提示词、配色、SHA-256、背景模式与偏差已记录到 `assets/branding/album-studio-logo-production.md`。此前误选 B2 时由本任务产生的临时成品已移到废纸篓，可恢复。
+用户最终选定的 A2 已精修为 1254 × 1254 不透明 RGB 母版 `assets/branding/album-studio-logo-master.png`，并从同一母版派生 1024px 构建 PNG、512px 运行时 PNG、macOS ICNS、包含 7 档尺寸的 Windows ICO，以及共享页面使用的 256px PNG。32 × 32 检查中笑脸、水绿封面和右侧李紫书脊仍清楚。ImageGen 留下的轻微色调变化作为正式图标现状保留，不另存生成提示词、候选截图或过程日志。
 
 Electron 构建配置现在显式指定 `build/icon.ico` 和 `build/icon.icns`；Windows/Linux 的 BrowserWindow 与 macOS 开发态 Dock 都使用 `resources/icon.png`。共享 `BrandMark` 在项目首页以 40px 装饰图呈现，在 Studio 顶栏以 32px 可访问品牌图呈现；桌面与 Web 入口继续复用同一个 Studio 实现。顶栏删除了与项目身份竞争的居中口号，并收敛为“项目身份 + 操作”两列。
 
@@ -626,3 +626,26 @@ macOS unpacked 产物和实际启动冒烟通过：`咔宝.app/Contents/MacOS/�
 右侧文字编辑面板新增“横排 / 竖排”。竖排使用真实的 `vertical-rl` 与 `upright` 排版，文字从上到下、列从右到左，中英文和数字均保持直立；对齐按钮同步显示顶部、居中和底部语义。编辑区、画布、页面缩略图、整册预览和打印/PDF 都复用同一套方向映射与 `AlbumPageView → BlockView → RichTextBlockView` 渲染链。竖排编辑区固定在面板宽度内，长内容在编辑区自身横向滚动，不会撑宽页面。
 
 最终 `npm run check` 完整通过：lint 0 error（保留 36 个既有 Prettier warning）、四个 workspace typecheck、Common 96/96、Studio 217/217、Desktop Vitest 80/80（另 3 项环境跳过）、Node 脚本 14/14、双端 production build、桌面开发 smoke 与 Web E2E 8/8。Electron E2E 4/4 另行通过。真实 Chromium 检查覆盖 1440×900、1100×720、800×640 的长中文和中英数混排；三个视口都没有页面横向溢出或控制台错误，竖排编辑区宽度分别收敛到 325px/344px/344px，画布与整册预览均为 `vertical-rl` / `upright`。
+
+---
+
+## 当前任务：清理误提交工件并推送
+
+> 状态：已完成
+>
+> 建立日期：2026-08-20
+
+### 计划
+
+- [x] 审计最近提交新增内容，区分运行必需的正式品牌/字体资产与候选图、生成记录和一次性工具。
+- [x] 删除不被产品引用的候选图、重试图、生成提示词/报告及一次性 Logo Skill，并补精确忽略规则。
+- [x] 检查残留引用、敏感信息、仓库状态和应用门禁，只暂存本任务文件。
+- [x] 提交清理，在不改写远端历史的前提下推送，并记录结果。
+
+### Review
+
+从当前源码树删除 22 个不参与运行的文件，合计约 11.7 MB：Logo 候选图及重试图、生成提示词/报告、生产过程记录，以及仅为一次制图安装的仓库级 `ip-as-logo` Skill 和软链接。正式 Logo 母版、桌面/Web 实际使用的图标、字体、许可证、贴纸、产品代码和回归测试全部保留。相关文档不再引用已删除工件，`skills-lock.json` 同步移除一次性 Skill。
+
+`.gitignore` 现在精确排除这些生成目录、截图目录和视觉检查目录。当前树没有残留候选/日志路径、可疑密钥文件或意外软链接，`git diff --check` 通过。完整 `npm run check` 通过：lint 0 error（保留 36 个既有格式 warning）、四个 workspace typecheck、Common 96/96、Studio 217/217、Desktop 80/80（另 3 项环境跳过）、Node 脚本 14/14、双端 production build、桌面开发 smoke 与 Web E2E 8/8。
+
+清理以普通后续提交快进到 `main`，不强制推送、不改写已发布历史；被删除文件仍可从旧提交恢复，但不再出现在最新源码树中。

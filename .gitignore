@@ -18,6 +18,14 @@ test-results/
 *.album-project/
 /tmp/
 /output/
+/screenshots/
+/visual-checks/
+
+# One-off design generation and repo-local generation tools
+/assets/branding/logo-concepts/
+/assets/branding/album-studio-logo-production.md
+/.agents/skills/ip-as-logo/
+/.claude/skills/ip-as-logo
 
 # AI 模型文件（消除人物功能，约 60MB，不进版本库；见 apps/desktop/resources/models/README.md）
 album-studio/apps/desktop/resources/models/*.onnx
