@@ -7,6 +7,12 @@
       "skillPath": "skills/frontend-design/SKILL.md",
       "computedHash": "4eabc66183767153e404b39d1b839b1c37f2d82d86f0a0d7e880a579d8d62336"
     },
+    "ip-as-logo": {
+      "source": "s1dashu/ip-as-logo-skill",
+      "sourceType": "github",
+      "skillPath": "SKILL.md",
+      "computedHash": "8e6f1ca5dc788296647d8c881210198a948dec094ef6b6d433e9a899a756659a"
+    },
     "shadcn": {
       "source": "shadcn/ui",
       "sourceType": "github",

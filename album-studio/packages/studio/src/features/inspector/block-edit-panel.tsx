@@ -24,13 +24,17 @@ import { useStudioPlatform } from '@/app/platform/use-studio-platform'
 import { useStudioStore } from '@/app/store'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
+import { FieldLegend, FieldSet } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { cn } from '@/shared/lib/cn'
 
 const RichTextEditor = lazy(async () => ({
   default: (await import('@/features/text-edit/rich-text-editor')).RichTextEditor
 }))
+
+const EMPTY_RECENT_COLORS: readonly string[] = []
 
 const MASK_NAMES: Record<(typeof MASK_KINDS)[number], string> = {
   rectangle: '直角',
@@ -353,15 +357,45 @@ function RichTextEditContent({
   block: Extract<Block, { type: 'rich-text' }>
 }): React.JSX.Element {
   const richTextDraft = useStudioStore((state) => state.richTextDraft)
+  const recentColors = useStudioStore(
+    (state) => state.document?.recentColors ?? EMPTY_RECENT_COLORS
+  )
   const setRichTextDraft = useStudioStore((state) => state.setRichTextDraft)
   const commitRichTextDraft = useStudioStore((state) => state.commitRichTextDraft)
-  const document =
+  const dispatch = useStudioStore((state) => state.dispatch)
+  const editorDocument =
     richTextDraft?.pageId === pageId && richTextDraft.blockId === block.id
       ? richTextDraft.document
       : block.document
 
   return (
     <Section title="文字内容与格式">
+      <FieldSet className="mb-3">
+        <FieldLegend>排列方向</FieldLegend>
+        <ToggleGroup
+          aria-label="排列方向"
+          onValueChange={(writingMode) => {
+            if (
+              writingMode === block.writingMode ||
+              (writingMode !== 'horizontal' && writingMode !== 'vertical')
+            ) {
+              return
+            }
+            commitRichTextDraft()
+            dispatch({
+              type: 'set-rich-text-writing-mode',
+              pageId,
+              blockId: block.id,
+              writingMode
+            })
+          }}
+          type="single"
+          value={block.writingMode}
+        >
+          <ToggleGroupItem value="horizontal">横排</ToggleGroupItem>
+          <ToggleGroupItem value="vertical">竖排</ToggleGroupItem>
+        </ToggleGroup>
+      </FieldSet>
       <Suspense
         fallback={
           <div className="rounded-lg border border-dashed p-4 text-xs text-muted-foreground">
@@ -370,9 +404,13 @@ function RichTextEditContent({
         }
       >
         <RichTextEditor
-          document={document}
-          onChange={(nextDocument) => setRichTextDraft(pageId, block.id, nextDocument)}
+          document={editorDocument}
+          onChange={(nextDocument, usedColors) =>
+            setRichTextDraft(pageId, block.id, nextDocument, usedColors)
+          }
           onBlur={commitRichTextDraft}
+          recentColors={recentColors}
+          writingMode={block.writingMode}
         />
       </Suspense>
     </Section>

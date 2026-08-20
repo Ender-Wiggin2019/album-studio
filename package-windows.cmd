@@ -11,6 +11,6 @@ exit /b 0
 
 :error
 echo.
-echo [电子相册工作室] 打包失败，请查看上面的错误信息。
+echo [咔宝] 打包失败，请查看上面的错误信息。
 pause
 exit /b 1

@@ -1,0 +1,113 @@
+Electronic Photo Album Mascot Logo — Exact Final Prompt Record
+Generated 2026-08-19
+
+Runtime: Codex built-in image_gen.imagegen
+Provider/model: not exposed by runtime
+Constraint delivery mode: main-prompt constraints
+Reference images: none
+
+========================================================================
+A1 FINAL PROMPT
+========================================================================
+
+Use case: logo-brand
+Asset type: square product mascot logo concept for an electronic photo album studio
+Create one complete full-bleed 1:1 square IP mascot logo artwork, approximately 1536 × 1536.
+Backdrop: cover the entire canvas with one visible, fully opaque solid coral #FF746B. Keep this coral clearly visible in all four square corners and every open area surrounding the mascot.
+Subject: place one highly simplified cute personified CLOSED PHOTO ALBUM mascot over the backdrop. It must be a compact upright rounded album cover, emerging from the lower-left and filling about 80% of the square. Use one dominant continuous rounded-rectangle outer silhouette and one thick, softly rounded LEFT BOOK SPINE as its single defining feature. Put exactly two simple dot eyes and one small rounded mouth on the front cover. The whole mark must read as a photo album, not a generic book, a camera, a photo frame, or a character illustration.
+Complexity: use 6–8 broad basic shapes, at most two broad internal color regions, and no small decoration. Keep the symbol readable at 32 × 32 and recognizable as a solid black silhouette.
+Color behavior: use exactly three semantic colors in the complete artwork. IP base color 1 is warm ivory #FFF1D0 for the main album cover. IP base color 2 is ink navy #24324A for the single continuous book-spine region and all facial marks. The backdrop is coral #FF746B. Do not introduce any other semantic color. Closely related tonal variants used only for ultra-light internal modeling remain within their base color family.
+Composition: upright, not tilted; lower-left emergence; fill 75–85%; keep the complete identifying spine visible; normal square outer corners.
+Style: ultra-clean Flat-first vector-friendly logo, thick soft weighty geometry, minimal graphic masses, only 8–12% extremely subtle internal tonal modeling inside the IP, barely neo-skeuomorphic and still mostly flat.
+Finish: show only this one album mascot over the full-canvas backdrop.
+Constraints: Use no text or watermark. Add no borders, frames, cards, or App-icon masks. Include one mascot only, with no extra subjects, loose photos, cameras, props, or scenery. Keep all contours thick and rounded, without fragile lines or sharp tips. Add no photorealistic material, dramatic bevel, glossy hotspot, deep occlusion, extrusion, strong three-dimensional rendering, clay/plastic/plush/toy appearance, or external cast shadow. Keep the background perfectly flat and uniform, with no gradient, texture, vignette, halo, spotlight, or lighting variation.
+Targeted correction: A prior prompt-only attempt incorrectly omitted the backdrop and added a photo-window emblem. This output must have an edge-to-edge fully opaque coral #FF746B background in every corner, not transparency or black. The ivory front cover must be completely plain except for exactly two navy dot eyes and one navy rounded mouth—no photo icon, picture-window outline, landscape symbol, label, inset panel, page edge, arms, legs, or decorative mark. Crop the single plain album body into the lower-left edge while keeping its complete navy left spine visible. Use essentially flat fills with only barely perceptible tonal softness.
+
+========================================================================
+A2 FINAL PROMPT
+========================================================================
+
+Targeted retry for a strict flat mascot logo. Generate a completely new image from text only; do not reference any earlier output.
+
+Use case: logo-brand
+Asset type: square product mascot logo for an electronic photo album studio
+Create one complete full-bleed 1:1 square artwork, approximately 1536 × 1536.
+
+NON-NEGOTIABLE BACKGROUND: every pixel of the square canvas behind the mark, including all four corners, must be opaque solid butter yellow #FFD95A. No transparency anywhere. No black field. No vignette or background shading.
+
+SUBJECT: exactly one closed photo album reduced to a logo symbol. Show a front-facing, upright, thick rounded-square AQUA cover emerging from the lower-right and occupying about 80% of the canvas. The only defining secondary region is one broad DEEP-PLUM vertical book-spine band attached to the right edge. The mascot has only two plum dot eyes and one plum small rounded mouth on the aqua cover. Personification comes from the face only.
+
+SHAPE LIMIT: use only the main rounded aqua cover, one broad rounded plum spine band, two eye dots, and one mouth shape. No arms. No hands. No legs. No feet. No photograph icon. No photo window. No mountains or sun. No pages, labels, decorations, accessories, separate character parts, or scenery. No white or cream.
+
+COLOR LIMIT: exactly three semantic colors total and visibly only these families: aqua #59D8C3 for the entire front cover; deep plum #4A285D for the single spine band, both eyes, and mouth; butter yellow #FFD95A for the full-canvas backdrop. Never add a fourth color. Any extremely subtle internal modeling must remain within aqua or plum and be barely visible.
+
+COMPOSITION AND STYLE: front-on orthographic view, upright, not tilted, no perspective depth, no external shadow. Thick rounded geometry; one strong compact silhouette; 75–85% fill; readable at 32 × 32. Ultra-clean Flat-first vector-friendly logo. At most 8–12% subtle internal tonal softness, otherwise flat. Normal square canvas corners.
+
+Constraints: Use no text or watermark. Add no borders, frames, cards, App-icon masks, transparency, extra subjects, props, or scenery. No fragile lines, sharp tips, glossy highlights, bevels, occlusion, extrusion, strong 3D rendering, clay, plastic, plush, inflatable, or toy appearance.
+
+========================================================================
+B1 FINAL PROMPT
+========================================================================
+
+Use case: logo-brand
+Asset type: square product mascot logo concept for an electronic photo album studio
+Create one complete full-bleed 1:1 square IP mascot logo artwork, approximately 1536 × 1536.
+Backdrop: cover the entire canvas with one visible, fully opaque solid fresh mint #61D7B0. Keep this mint clearly visible in all four square corners and every open area surrounding the mascot.
+Subject: place one highly simplified cute personified OPEN PHOTO ALBUM mascot over the backdrop. It emerges from the lower-left and fills about 80% of the square. The dominant silhouette is a compact open album: exactly two broad, thick, softly rounded page lobes are both visible and form a gentle hug-like paired shape; beneath them is one continuous rounded cover-underside region. Put exactly two simple dot eyes and one small rounded mouth on the central light page area. It must read as an open photo album, not a bird, butterfly, generic open book illustration, or separate pair of characters.
+Complexity: use 6–9 broad basic shapes, at most two broad internal color regions, and no page lines, photo thumbnails, page corners, or small decoration. Keep the symbol readable at 32 × 32 and recognizable as a solid black silhouette.
+Color behavior: use exactly three semantic colors in the complete artwork. IP base color 1 is pale butter #FFE9A6 for both broad page lobes. IP base color 2 is berry purple #6C2B69 for the one continuous cover-underside region and all facial marks. The backdrop is fresh mint #61D7B0. Do not introduce any other semantic color. Closely related tonal variants used only for ultra-light internal modeling remain within their base color family.
+Composition: upright, not tilted; lower-left emergence; fill 75–85%; show both paired page lobes completely; normal square outer corners.
+Style: ultra-clean Flat-first vector-friendly logo, thick soft weighty geometry, minimal graphic masses, only 8–12% extremely subtle internal tonal modeling inside the IP, barely neo-skeuomorphic and still mostly flat.
+Finish: show only this one album mascot over the full-canvas backdrop.
+Constraints: Use no text or watermark. Add no borders, frames, cards, or App-icon masks. Include one mascot only, with no extra subjects, loose photos, cameras, props, or scenery. Keep all contours thick and rounded, without fragile lines or sharp tips. Add no photorealistic material, dramatic bevel, glossy hotspot, deep occlusion, extrusion, strong three-dimensional rendering, clay/plastic/plush/toy appearance, or external cast shadow. Keep the background perfectly flat and uniform, with no gradient, texture, vignette, halo, spotlight, or lighting variation.
+Targeted correction priorities: The output image itself must be fully opaque—do not use transparency or an alpha-style empty background. Every pixel outside the mascot, including all four corners, must visibly be the exact flat mint background #61D7B0. Keep the mascot vertically upright with its baseline level and no diagonal rotation. Reduce all subject shading to a barely perceptible tonal softness; use flat broad masses with no page-edge bands, stacked layers, deep shading, or dimensional rendering.
+
+========================================================================
+B2 FINAL PROMPT
+========================================================================
+
+Targeted retry for a strict flat open-album mascot logo. Generate a new image from text only, with no reference to any earlier image.
+
+Create one full-bleed opaque 1:1 square logo, approximately 1536 × 1536.
+BACKGROUND IS NON-NEGOTIABLE: fill every canvas pixel and all four corners with one perfectly uniform flat deep indigo #2C2A6D. No transparency, gradient, vignette, glow, spotlight, texture, or lighting change.
+
+Draw exactly one cute open photo album using only broad rounded shapes. It must be FRONT-FACING, UPRIGHT, HORIZONTALLY LEVEL, and NOT ROTATED. Let it emerge from the lower-right and fill 75–85% of the square. Show exactly two complete broad sky-blue #78C8FF page lobes as a paired hug-like shape. Beneath them, use one single continuous warm-orange #FF9E4A cover-underside region. Put exactly two orange dot eyes and one small orange rounded mouth on the central blue page area.
+
+Use exactly these three semantic color families total: sky blue #78C8FF, warm orange #FF9E4A, deep indigo #2C2A6D. No white, black, or fourth color. Keep any subject tonal softness barely perceptible, within 8–12%; the result must read as a flat vector mark, not a rendered object.
+
+Use 6–9 shapes maximum. No page lines, loose photos, thumbnails, arms, hands, feet, labels, decorations, props, scenery, text, watermark, border, frame, card, App-icon mask, sharp tips, fragile lines, cast shadow, bevel, glossy hotspot, extrusion, clay, plastic, plush, toy, inflatable, or strong 3D appearance. Both page lobes must remain fully visible and the symbol must read clearly at 32 × 32.
+
+========================================================================
+C1 FINAL PROMPT
+========================================================================
+
+Use case: logo-brand
+Asset type: square product mascot logo concept for an electronic photo album studio
+Create one complete full-bleed 1:1 square IP mascot logo artwork, approximately 1536 × 1536.
+Backdrop: cover the entire canvas with one visible, fully opaque solid pale aqua #9CE5DE. Keep this aqua clearly visible in all four square corners and every open area surrounding the mascot.
+Subject: place one highly simplified cute personified CLOSED PHOTO ALBUM mascot over the backdrop. It emerges from the lower-left and fills about 80% of the square. Use one dominant continuous thick rounded album-cover silhouette. Its single defining feature is one very large softly rounded rectangular PHOTO WINDOW inset as a single continuous region on the cover. Put exactly two simple dot eyes and one small rounded mouth INSIDE that photo window. It must read as a photo album with a cover window, not a phone, camera, picture frame, card, or screen device.
+Complexity: use 6–8 broad basic shapes, at most two broad internal color regions, and no photo image, landscape, page lines, buttons, labels, or small decoration. Keep the symbol readable at 32 × 32 and recognizable as a solid black silhouette.
+Color behavior: use exactly three semantic colors in the complete artwork. IP base color 1 is vivid tangerine #FF8A4C for the entire album body and for the facial marks inside the window. IP base color 2 is warm cream #FFF0C7 for the one continuous photo-window region. The backdrop is pale aqua #9CE5DE. Do not introduce any other semantic color. Closely related tonal variants used only for ultra-light internal modeling remain within their base color family.
+Composition: upright, not tilted; lower-left emergence; fill 75–85%; keep the entire window and silhouette readable; normal square outer corners.
+Style: ultra-clean Flat-first vector-friendly logo, thick soft weighty geometry, minimal graphic masses, only 8–12% extremely subtle internal tonal modeling inside the IP, barely neo-skeuomorphic and still mostly flat.
+Finish: show only this one album mascot over the full-canvas backdrop.
+Constraints: Use no text or watermark. Add no borders, frames, cards, or App-icon masks. Include one mascot only, with no extra subjects, loose photos, cameras, props, or scenery. Keep all contours thick and rounded, without fragile lines or sharp tips. Add no photorealistic material, dramatic bevel, glossy hotspot, deep occlusion, extrusion, strong three-dimensional rendering, clay/plastic/plush/toy appearance, or external cast shadow. Keep the background perfectly flat and uniform, with no gradient, texture, vignette, halo, spotlight, or lighting variation.
+
+The one rejected retry used the complete prompt above plus:
+
+Priority correction after a rejected attempt: enforce the locked flat three-color construction literally—solid opaque aqua backdrop, tangerine album body, and one cream window containing the tangerine face; omit every other color, limb, picture motif, decorative shape, and volumetric rendering.
+
+========================================================================
+C2 FINAL PROMPT
+========================================================================
+
+Use case: logo-brand
+Asset type: square product mascot logo concept for an electronic photo album studio
+Create one complete full-bleed opaque 1:1 square mascot logo, approximately 1536 × 1536.
+Backdrop: fill every background pixel and all four square corners with one perfectly uniform solid soft rose #FF9FB6. No transparency, gradient, vignette, halo, texture, or lighting variation.
+Subject: exactly one highly simplified cute personified CLOSED PHOTO ALBUM. It emerges from the lower-right and fills 75–85% of the square. Use one dominant continuous thick rounded-square COBALT album-cover silhouette, front-facing and upright. Its single defining feature is one very large softly rounded rectangular WARM-CREAM photo-window inset as one continuous region. Put exactly two simple cobalt dot eyes and one small cobalt rounded mouth inside the cream photo window. It must read as a photo album with a cover window, not a phone, camera, picture frame, card, screen device, or full character body.
+Complexity: use 6–8 broad basic shapes, at most two broad internal regions, and no photo image, landscape, page lines, labels, buttons, arms, hands, legs, feet, accessories, or small decoration. Readable at 32 × 32 and recognizable as a solid black silhouette.
+Color behavior: exactly three semantic colors total. IP base color 1 cobalt #3558D4 for the entire album body and the eyes/mouth. IP base color 2 warm cream #FFF0C7 for the single continuous photo-window region. Backdrop soft rose #FF9FB6. Never introduce black, white, or a fourth color; any ultra-light internal modeling must stay within a base family.
+Style and composition: front-on orthographic, upright, not tilted, lower-right emergence, thick rounded weighty geometry, strong compact silhouette, ultra-clean Flat-first vector-friendly mark, only 8–12% barely visible internal tonal softness, normal square corners.
+Constraints: no text, watermark, border, frame, card, App-icon mask, transparency, extra subject, loose photo, prop, or scenery. No fragile lines, sharp tips, cast shadow, bevel, glossy hotspot, deep occlusion, extrusion, strong 3D, clay, plastic, plush, toy, or inflatable appearance.
+Targeted correction priorities: render the rose backdrop as one single literal flat fill across the entire image, including identical-looking color at all four corners—no tonal drift, center glow, edge darkening, or texture. Make the album an almost-flat front cover mark with no visible thickness, layered side panel, inner shadow, bevel, or device-like bezel. Keep the cream region clearly recognizable as a printed photo-window inset on an album cover by placing it in the upper cover area with a broad uninterrupted cobalt cover mass below it; preserve the single rounded-square album silhouette and do not add any new feature, button, page, photo content, or decoration. Use broad flat cobalt and cream masses with only barely perceptible softness.

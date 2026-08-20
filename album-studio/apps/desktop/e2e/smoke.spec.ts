@@ -128,7 +128,7 @@ async function seedProject(userData: string): Promise<{
   return { document, manifestPath, projectRoot }
 }
 
-test.describe('电子相册工作室', () => {
+test.describe('咔宝', () => {
   let app: ElectronApplication
   let userData: string
   let seeded: Awaited<ReturnType<typeof seedProject>>
@@ -160,7 +160,7 @@ test.describe('电子相册工作室', () => {
       if (message.type() === 'error') runtimeErrors.push(message.text())
     })
     await page.waitForLoadState('networkidle')
-    await expect(page).toHaveTitle('电子相册工作室')
+    await expect(page).toHaveTitle('咔宝')
     // 启动后自动继续打开最近编辑过的相册，不再停留在项目首页
     await expect(page.locator('.project-identity')).toContainText('端到端测试相册')
     await expect(page.getByText('已保存', { exact: true })).toBeVisible()

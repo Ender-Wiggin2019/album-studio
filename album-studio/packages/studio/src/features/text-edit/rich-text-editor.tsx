@@ -1,4 +1,8 @@
-import type { RichTextDocument } from '@album-studio/common'
+import {
+  mergeRecentColors,
+  type RichTextDocument,
+  type RichTextWritingMode
+} from '@album-studio/common'
 import { ListItemNode, ListNode } from '@lexical/list'
 import { AutoFocusPlugin } from '@lexical/react/LexicalAutoFocusPlugin'
 import { LexicalComposer, type InitialConfigType } from '@lexical/react/LexicalComposer'
@@ -29,13 +33,15 @@ import {
   type LexicalEditor,
   type MutationListener
 } from 'lexical'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { cn } from '@/shared/lib/cn'
 import {
   albumLineHeightState,
   lexicalEditorStateToRichTextDocument,
   richTextDocumentToLexicalEditorState
 } from './lexical-adapter'
 import { RichTextToolbar } from './rich-text-toolbar'
+import { RICH_TEXT_WRITING_STYLES, richTextAlignmentToCss } from './rich-text-writing'
 
 const EXTERNAL_DOCUMENT_TAG = 'album-rich-text-external-document'
 
@@ -43,8 +49,8 @@ const EDITOR_THEME: EditorThemeClasses = {
   paragraph: 'm-0 min-h-6',
   list: {
     listitem: 'my-0.5',
-    ol: 'my-0 list-decimal pl-6',
-    ul: 'my-0 list-disc pl-6'
+    ol: 'my-0 list-decimal ps-6',
+    ul: 'my-0 list-disc ps-6'
   },
   text: {
     bold: 'font-bold',
@@ -55,9 +61,11 @@ const EDITOR_THEME: EditorThemeClasses = {
 
 export type RichTextEditorProps = Readonly<{
   document: RichTextDocument
-  onChange: (document: RichTextDocument) => void
+  onChange: (document: RichTextDocument, usedColors?: readonly string[]) => void
   onBlur?: () => void
   autoFocus?: boolean
+  recentColors?: readonly string[]
+  writingMode?: RichTextWritingMode
 }>
 
 function handleLexicalError(error: Error): never {
@@ -65,14 +73,17 @@ function handleLexicalError(error: Error): never {
 }
 
 function VerifiedOnChangePlugin({
-  onChange
-}: Pick<RichTextEditorProps, 'onChange'>): React.JSX.Element {
+  onChange,
+  usedColors
+}: Pick<RichTextEditorProps, 'onChange'> & {
+  usedColors: React.RefObject<readonly string[]>
+}): React.JSX.Element {
   const handleChange = useCallback(
     (editorState: EditorState, _editor: LexicalEditor, tags: Set<string>): void => {
       if (tags.has(EXTERNAL_DOCUMENT_TAG)) return
-      onChange(lexicalEditorStateToRichTextDocument(editorState.toJSON()))
+      onChange(lexicalEditorStateToRichTextDocument(editorState.toJSON()), usedColors.current)
     },
-    [onChange]
+    [onChange, usedColors]
   )
 
   return (
@@ -184,11 +195,11 @@ function RestrictedInputPlugin(): null {
   return null
 }
 
-function LineHeightDomPlugin(): null {
+function BlockFormattingDomPlugin({ writingMode }: { writingMode: RichTextWritingMode }): null {
   const [editor] = useLexicalComposerContext()
 
   useEffect(() => {
-    const syncLineHeight: MutationListener = (mutations) => {
+    const syncBlockFormatting: MutationListener = (mutations) => {
       editor.getEditorState().read(() => {
         for (const [key, mutation] of mutations) {
           if (mutation === 'destroyed') continue
@@ -197,16 +208,21 @@ function LineHeightDomPlugin(): null {
           const element = editor.getElementByKey(key)
           if (element !== null) {
             element.style.lineHeight = String($getState(node, albumLineHeightState))
+            const alignment = node.getFormatType()
+            element.style.textAlign = richTextAlignmentToCss(
+              writingMode,
+              alignment === 'center' || alignment === 'right' ? alignment : 'left'
+            )
           }
         }
       })
     }
 
     return mergeRegister(
-      editor.registerMutationListener(ParagraphNode, syncLineHeight),
-      editor.registerMutationListener(ListNode, syncLineHeight)
+      editor.registerMutationListener(ParagraphNode, syncBlockFormatting),
+      editor.registerMutationListener(ListNode, syncBlockFormatting)
     )
-  }, [editor])
+  }, [editor, writingMode])
 
   return null
 }
@@ -215,8 +231,12 @@ export function RichTextEditor({
   document,
   onChange,
   onBlur,
-  autoFocus = false
+  autoFocus = false,
+  recentColors = [],
+  writingMode = 'horizontal'
 }: RichTextEditorProps): React.JSX.Element {
+  const usedColors = useRef<readonly string[]>([])
+  const editorInteracted = useRef(false)
   const [initialConfig] = useState<InitialConfigType>(() => ({
     namespace: 'AlbumRichTextEditor',
     editorState: JSON.stringify(richTextDocumentToLexicalEditorState(document)),
@@ -233,25 +253,49 @@ export function RichTextEditor({
     [onBlur]
   )
 
+  const handleColorSelect = useCallback((color: string): void => {
+    usedColors.current = mergeRecentColors([color], usedColors.current)
+  }, [])
+
   return (
     <LexicalComposer initialConfig={initialConfig}>
-      <div className="flex flex-col gap-2" onBlur={handleBlur}>
-        <RichTextToolbar />
-        <div className="relative overflow-hidden rounded-lg border bg-background shadow-sm focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/25">
+      <div className="flex min-w-0 flex-col gap-2" onBlur={handleBlur}>
+        <RichTextToolbar
+          editorInteracted={editorInteracted}
+          onColorSelect={handleColorSelect}
+          recentColors={recentColors}
+          writingMode={writingMode}
+        />
+        <div className="relative min-w-0 overflow-hidden rounded-lg border bg-background shadow-sm focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/25">
           <RichTextPlugin
             contentEditable={
               <ContentEditable
                 aria-label="富文本内容"
                 aria-multiline="true"
-                className="min-h-32 px-3 py-2.5 text-sm leading-relaxed outline-none"
+                className={cn(
+                  'w-full min-w-0 max-w-full px-3 py-2.5 text-sm leading-relaxed outline-none',
+                  writingMode === 'vertical' ? 'h-48 overflow-x-auto' : 'min-h-32'
+                )}
+                data-writing-mode={writingMode}
+                onKeyDown={() => {
+                  editorInteracted.current = true
+                }}
+                onPointerDown={() => {
+                  editorInteracted.current = true
+                }}
                 spellCheck
+                style={RICH_TEXT_WRITING_STYLES[writingMode]}
               />
             }
             ErrorBoundary={LexicalErrorBoundary}
             placeholder={
               <div
                 aria-hidden="true"
-                className="pointer-events-none absolute left-3 top-2.5 text-sm text-muted-foreground"
+                className={cn(
+                  'pointer-events-none absolute top-2.5 text-sm text-muted-foreground',
+                  writingMode === 'vertical' ? 'right-3' : 'left-3'
+                )}
+                style={RICH_TEXT_WRITING_STYLES[writingMode]}
               >
                 输入文字…
               </div>
@@ -261,9 +305,9 @@ export function RichTextEditor({
         <HistoryPlugin delay={600} />
         <ListPlugin hasStrictIndent />
         <RestrictedInputPlugin />
-        <LineHeightDomPlugin />
+        <BlockFormattingDomPlugin writingMode={writingMode} />
         <DocumentSyncPlugin document={document} />
-        <VerifiedOnChangePlugin onChange={onChange} />
+        <VerifiedOnChangePlugin onChange={onChange} usedColors={usedColors} />
         {autoFocus ? <AutoFocusPlugin defaultSelection="rootEnd" /> : null}
       </div>
     </LexicalComposer>

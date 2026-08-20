@@ -1,5 +1,5 @@
 appId: com.albumstudio.desktop
-productName: 电子相册工作室
+productName: 咔宝
 directories:
   buildResources: build
 asar: true
@@ -35,16 +35,18 @@ extraResources:
     filter:
       - '**/*.onnx'
 win:
-  executableName: album-studio
+  icon: build/icon.ico
+  executableName: kabo
   target:
     - nsis
     - portable
 nsis:
-  artifactName: ${name}-${version}-setup.${ext}
+  artifactName: kabo-${version}-setup.${ext}
   shortcutName: ${productName}
   uninstallDisplayName: ${productName}
   createDesktopShortcut: always
 mac:
+  icon: build/icon.icns
   identity: '-'
   hardenedRuntime: false
   entitlementsInherit: build/entitlements.mac.plist
@@ -56,5 +58,5 @@ mac:
         - universal
   notarize: false
 dmg:
-  artifactName: ${name}-${version}.${ext}
+  artifactName: kabo-${version}.${ext}
 npmRebuild: false

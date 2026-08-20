@@ -72,30 +72,52 @@ test('页面栏支持拖拽排序、取消、撤销重做与刷新持久化', as
   await page.getByRole('button', { name: '创建相册' }).click()
   await expect(page.locator('.project-identity')).toContainText('页面排序回归')
 
-  await page.getByRole('button', { name: '添加页面' }).click()
-  await page.getByRole('button', { name: '添加页面' }).click()
+  const coverPreview = page.getByRole('button', { name: '封面预览' })
+  const addAfterCover = page.getByRole('button', { name: '在封面后添加页面' })
+  await expect(addAfterCover).toHaveCSS('opacity', '0')
+  await coverPreview.hover()
+  await expect(addAfterCover).toHaveCSS('opacity', '1')
+  await addAfterCover.click()
+  await page.getByRole('button', { name: '添加页面', exact: true }).click()
   await expect.poll(async () => (await readOnlyManifest(page)).pages.length).toBe(3)
   await expect(page.locator('.page-rail')).toHaveCSS('flex-direction', 'column')
   const originalIds = (await readOnlyManifest(page)).pages.map((albumPage) => albumPage.id)
   const reorderedIds = [originalIds[0], originalIds[2], originalIds[1]]
 
-  const firstHandle = page.getByRole('button', { name: '拖拽排序第 1 页' })
-  const secondHandle = page.getByRole('button', { name: '拖拽排序第 2 页' })
-  const firstHandleBox = await firstHandle.boundingBox()
+  await expect(page.getByRole('button', { name: '拖拽排序第 1 页' })).toHaveCount(0)
+  const firstPreview = page.getByRole('button', { name: '第 1 页预览，可拖拽排序' })
+  const secondPreview = page.getByRole('button', { name: '第 2 页预览，可拖拽排序' })
+  const firstPreviewBox = await firstPreview.boundingBox()
   const secondItemBox = await page
     .locator('.page-rail-item')
-    .filter({ has: secondHandle })
+    .filter({ has: secondPreview })
     .boundingBox()
-  if (!firstHandleBox || !secondItemBox) throw new Error('无法测量页面排序手柄')
+  if (!firstPreviewBox || !secondItemBox) throw new Error('无法测量页面预览')
 
+  await expect(secondPreview).toHaveAttribute('aria-current', 'page')
   await page.mouse.move(
-    firstHandleBox.x + firstHandleBox.width / 2,
-    firstHandleBox.y + firstHandleBox.height / 2
+    firstPreviewBox.x + firstPreviewBox.width / 2,
+    firstPreviewBox.y + firstPreviewBox.height / 2
   )
   await page.mouse.down()
+  await page.waitForTimeout(80)
+  await expect(page.locator('.page-rail-item[data-dnd-dragging="true"]')).toHaveCount(0)
+  await page.mouse.up()
+  await expect(firstPreview).toHaveAttribute('aria-current', 'page')
+  await expect(secondPreview).not.toHaveAttribute('aria-current', 'page')
+  await expect
+    .poll(async () => (await readOnlyManifest(page)).pages.map(({ id }) => id))
+    .toEqual(originalIds)
+
   await page.mouse.move(
-    firstHandleBox.x + firstHandleBox.width / 2 + 8,
-    firstHandleBox.y + firstHandleBox.height / 2 + 8,
+    firstPreviewBox.x + firstPreviewBox.width / 2,
+    firstPreviewBox.y + firstPreviewBox.height / 2
+  )
+  await page.mouse.down()
+  await page.waitForTimeout(260)
+  await page.mouse.move(
+    firstPreviewBox.x + firstPreviewBox.width / 2 + 8,
+    firstPreviewBox.y + firstPreviewBox.height / 2 + 8,
     { steps: 4 }
   )
   await expect(page.locator('.page-rail-item[data-dnd-dragging="true"]')).toHaveAttribute(
@@ -107,6 +129,37 @@ test('页面栏支持拖拽排序、取消、撤销重做与刷新持久化', as
     secondItemBox.y + secondItemBox.height * 0.9,
     { steps: 12 }
   )
+  const insertionPlaceholder = page.locator('.page-rail-item[data-dnd-placeholder]')
+  await expect(insertionPlaceholder).toHaveCount(1)
+  const dropIndicator = await insertionPlaceholder.evaluate((element) => {
+    const style = getComputedStyle(element, '::before')
+    const draggedPage = element.previousElementSibling as HTMLElement | null
+    const pageBeforeDragged = draggedPage?.previousElementSibling as HTMLElement | null
+    return {
+      draggedPageId: draggedPage?.dataset.pageId,
+      height: Number.parseFloat(style.height),
+      opacity: style.opacity,
+      pageBeforeDraggedId: pageBeforeDragged?.dataset.pageId,
+      top: Number.parseFloat(style.top)
+    }
+  })
+  expect(dropIndicator.draggedPageId).toBe(originalIds[1])
+  expect(dropIndicator.height).toBeGreaterThanOrEqual(2)
+  expect(dropIndicator.opacity).toBe('1')
+  expect(dropIndicator.pageBeforeDraggedId).toBe(originalIds[2])
+  expect(dropIndicator.top).toBeLessThan(0)
+  await expect
+    .poll(() =>
+      page.locator('.page-rail-item').evaluateAll((items) =>
+        items
+          .filter((item) => getComputedStyle(item, '::before').opacity === '1')
+          .map((item) => ({
+            pageId: (item as HTMLElement).dataset.pageId,
+            placeholder: item.hasAttribute('data-dnd-placeholder')
+          }))
+      )
+    )
+    .toEqual([{ pageId: originalIds[1], placeholder: true }])
   // dnd-kit 先做 optimistic DOM 排序；等可见顺序真正改变再松手，
   // 避免测试机器在最后一次 pointermove 尚未处理时就发出 pointerup。
   await expect
@@ -150,24 +203,248 @@ test('页面栏支持拖拽排序、取消、撤销重做与刷新持久化', as
       })
     })
     .toBe(true)
-  const narrowHandle = page.getByRole('button', { name: '拖拽排序第 1 页' })
-  await expect(narrowHandle).toBeVisible()
-  await expect(narrowHandle).toBeEnabled()
-  const narrowHandleBox = await narrowHandle.boundingBox()
-  expect(narrowHandleBox).not.toBeNull()
-  expect(narrowHandleBox!.x).toBeGreaterThanOrEqual(0)
-  expect(narrowHandleBox!.x + narrowHandleBox!.width).toBeLessThanOrEqual(800)
+  const narrowPreview = page.getByRole('button', { name: '第 1 页预览，可拖拽排序' })
+  await expect(narrowPreview).toBeVisible()
+  await expect(narrowPreview).toBeEnabled()
+  const narrowPreviewBox = await narrowPreview.boundingBox()
+  expect(narrowPreviewBox).not.toBeNull()
+  expect(narrowPreviewBox!.x).toBeGreaterThanOrEqual(0)
+  expect(narrowPreviewBox!.x + narrowPreviewBox!.width).toBeLessThanOrEqual(800)
 
-  await narrowHandle.focus()
-  await narrowHandle.press('Space')
-  const narrowItem = page.locator('.page-rail-item').filter({ has: narrowHandle })
+  await narrowPreview.focus()
+  await expect(page.getByRole('button', { name: '在第 1 页后添加页面' })).toHaveCSS('opacity', '1')
+  const narrowSecondPreview = page.getByRole('button', {
+    name: '第 2 页预览，可拖拽排序'
+  })
+  const narrowSecondItemBox = await page
+    .locator('.page-rail-item')
+    .filter({ has: narrowSecondPreview })
+    .boundingBox()
+  if (!narrowSecondItemBox) throw new Error('无法测量窄栏第二页')
+  await page.mouse.move(
+    narrowPreviewBox!.x + narrowPreviewBox!.width / 2,
+    narrowPreviewBox!.y + narrowPreviewBox!.height / 2
+  )
+  await page.mouse.down()
+  await page.waitForTimeout(260)
+  await page.mouse.move(
+    narrowPreviewBox!.x + narrowPreviewBox!.width / 2 + 12,
+    narrowPreviewBox!.y + narrowPreviewBox!.height / 2,
+    { steps: 4 }
+  )
+  await page.mouse.move(
+    narrowSecondItemBox.x + narrowSecondItemBox.width * 0.9,
+    narrowSecondItemBox.y + narrowSecondItemBox.height / 2,
+    { steps: 12 }
+  )
+  const narrowInsertionPlaceholder = page.locator('.page-rail-item[data-dnd-placeholder]')
+  await expect(narrowInsertionPlaceholder).toHaveCount(1)
+  const narrowDropIndicator = await narrowInsertionPlaceholder.evaluate((element) => {
+    const style = getComputedStyle(element, '::before')
+    return {
+      left: Number.parseFloat(style.left),
+      opacity: style.opacity,
+      width: Number.parseFloat(style.width)
+    }
+  })
+  expect(narrowDropIndicator.left).toBeLessThan(0)
+  expect(narrowDropIndicator.opacity).toBe('1')
+  expect(narrowDropIndicator.width).toBeGreaterThanOrEqual(2)
+  await page.keyboard.press('Escape')
+  await page.mouse.up()
+
+  await narrowPreview.focus()
+  await narrowPreview.press('Space')
+  const narrowItem = page.locator('.page-rail-item').filter({ has: narrowPreview })
   await expect(narrowItem).toHaveAttribute('data-dragging', 'true')
-  await narrowHandle.press('ArrowRight')
-  await narrowHandle.press('Escape')
+  await narrowPreview.press('ArrowRight')
+  await narrowPreview.press('Escape')
   await expect(narrowItem).not.toHaveAttribute('data-dragging', 'true')
   await expect
     .poll(async () => (await readOnlyManifest(page)).pages.map(({ id }) => id))
     .toEqual(reorderedIds)
+
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  await expect(page.getByRole('button', { name: '在第 1 页后添加页面' })).toHaveCSS(
+    'transition-duration',
+    '0s'
+  )
+})
+
+test('A4 竖排页面栏使用紧凑缩略图', async ({ page }) => {
+  await page.getByRole('button', { name: '新建相册' }).first().click()
+  await page.getByLabel('相册名称').fill('竖排页面栏尺寸回归')
+  await page.getByRole('radio', { name: /A4 竖排/ }).click()
+  await page.getByRole('button', { name: '创建相册' }).click()
+
+  const rail = page.getByLabel('相册页面')
+  const coverPreview = page.getByRole('button', { name: '封面预览' })
+  const coverPage = coverPreview.locator('.album-page')
+  await expect(rail).toHaveAttribute('data-page-orientation', 'portrait')
+  const desktopPreviewBox = await coverPreview.boundingBox()
+  const desktopPageBox = await coverPage.boundingBox()
+  expect(desktopPreviewBox).not.toBeNull()
+  expect(desktopPageBox).not.toBeNull()
+  expect(desktopPreviewBox!.width).toBeLessThanOrEqual(160)
+  expect(desktopPreviewBox!.height).toBeLessThanOrEqual(228)
+  expect(desktopPageBox!.width / desktopPageBox!.height).toBeCloseTo(210 / 297, 2)
+
+  await page.setViewportSize({ width: 800, height: 640 })
+  const narrowPreviewBox = await coverPreview.boundingBox()
+  const narrowPageBox = await coverPage.boundingBox()
+  expect(narrowPreviewBox).not.toBeNull()
+  expect(narrowPageBox).not.toBeNull()
+  expect(narrowPreviewBox!.height).toBeLessThanOrEqual(76)
+  expect(narrowPageBox!.width / narrowPageBox!.height).toBeCloseTo(210 / 297, 2)
+})
+
+test('画布图片可直接拖到另一页，并在撤销重做时保持有效选择', async ({ page }) => {
+  await page.setViewportSize({ width: 1100, height: 720 })
+  await page.getByRole('button', { name: '新建相册' }).first().click()
+  await page.getByLabel('相册名称').fill('图片跨页移动回归')
+  await page.getByRole('button', { name: '创建相册' }).click()
+
+  const coverPreview = page.getByRole('button', { name: '封面预览' })
+  await coverPreview.hover()
+  await page.getByRole('button', { name: '在封面后添加页面' }).click()
+  await page.getByRole('button', { name: '添加页面', exact: true }).click()
+  await expect.poll(async () => (await readOnlyManifest(page)).pages.length).toBe(3)
+  const initialDocument = await readOnlyManifest(page)
+  const sourcePageId = initialDocument.pages[1]?.id
+  const targetPageId = initialDocument.pages[2]?.id
+  if (!sourcePageId || !targetPageId) throw new Error('跨页移动测试缺少内容页')
+
+  const sourcePreview = page.getByRole('button', { name: '第 1 页预览，可拖拽排序' })
+  const targetPreview = page.getByRole('button', { name: '第 2 页预览，可拖拽排序' })
+  await sourcePreview.click()
+  await expect(sourcePreview).toHaveAttribute('aria-current', 'page')
+
+  await page.getByRole('button', { name: '装帧托盘' }).click()
+  await page.getByRole('tab', { name: /素材/ }).click()
+  const fileChooser = page.waitForEvent('filechooser')
+  await page.getByRole('button', { name: '选择图片' }).click()
+  await (
+    await fileChooser
+  ).setFiles({
+    name: '跨页移动照片.png',
+    mimeType: 'image/png',
+    buffer: TEST_PNG
+  })
+  await page.getByRole('checkbox', { name: '选择 跨页移动照片.png' }).click()
+  await page.getByRole('button', { name: /导入所选/ }).click()
+  await page.getByRole('button', { name: /添加 跨页移动照片\.png 到当前页/ }).click()
+  await page.getByRole('button', { name: '关闭', exact: true }).click()
+
+  await expect
+    .poll(async () => {
+      const document = await readOnlyManifest(page)
+      return document.pages.find(({ id }) => id === sourcePageId)?.blocks.length
+    })
+    .toBe(1)
+  const image = page
+    .getByRole('region', { name: '相册画布' })
+    .getByRole('button', { name: '选择照片 跨页移动照片.png' })
+  await image.click()
+  await expect(page.locator('.moveable-control-box')).toBeVisible()
+  await page.getByRole('button', { name: '关闭', exact: true }).click()
+  await expect(page.getByText('已保存', { exact: true })).toBeVisible()
+  const beforeMove = await readOnlyManifest(page)
+  const sourceImage = beforeMove.pages
+    .find(({ id }) => id === sourcePageId)
+    ?.blocks.find((block): block is ImageBlock => block.type === 'image')
+  if (!sourceImage) throw new Error('源页面缺少待移动图片')
+
+  const sourceItem = page.locator('.page-rail-item').filter({ has: sourcePreview })
+  const targetItem = page.locator('.page-rail-item').filter({ has: targetPreview })
+  const sourceBox = await sourceItem.boundingBox()
+  const targetBox = await targetItem.boundingBox()
+  const railHeadingBox = await page.locator('.page-rail-heading').boundingBox()
+  if (!sourceBox || !targetBox || !railHeadingBox) {
+    throw new Error('无法测量页面栏跨页拖动目标')
+  }
+
+  const expectMoveCanceled = async (): Promise<void> => {
+    await expect
+      .poll(async () => {
+        const document = await readOnlyManifest(page)
+        return {
+          revision: document.revision,
+          sourceBlock: document.pages.find(({ id }) => id === sourcePageId)?.blocks[0],
+          targetCount: document.pages.find(({ id }) => id === targetPageId)?.blocks.length
+        }
+      })
+      .toEqual({ revision: beforeMove.revision, sourceBlock: sourceImage, targetCount: 0 })
+  }
+
+  for (const canceledTarget of [sourceBox, railHeadingBox]) {
+    const imageBox = await image.boundingBox()
+    if (!imageBox) throw new Error('无法测量待移动图片')
+    await page.mouse.move(imageBox.x + imageBox.width / 2, imageBox.y + imageBox.height / 2)
+    await page.mouse.down()
+    await page.mouse.move(
+      canceledTarget.x + canceledTarget.width / 2,
+      canceledTarget.y + canceledTarget.height / 2,
+      { steps: 20 }
+    )
+    await expect(page.locator('[data-block-drop-target="true"]')).toHaveCount(0)
+    await page.mouse.up()
+    await expectMoveCanceled()
+  }
+
+  const imageBox = await image.boundingBox()
+  if (!imageBox) throw new Error('无法测量待移动图片')
+  await page.mouse.move(imageBox.x + imageBox.width / 2, imageBox.y + imageBox.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(targetBox.x + targetBox.width / 2, targetBox.y + targetBox.height / 2, {
+    steps: 20
+  })
+  await expect(targetItem).toHaveAttribute('data-block-drop-target', 'true')
+  await page.mouse.up()
+
+  await expect(targetPreview).toHaveAttribute('aria-current', 'page')
+  await expect(image).toHaveAttribute('data-selected', 'true')
+  await expect(targetItem).not.toHaveAttribute('data-block-drop-target')
+  await expect
+    .poll(async () => {
+      const document = await readOnlyManifest(page)
+      const source = document.pages.find(({ id }) => id === sourcePageId)
+      const target = document.pages.find(({ id }) => id === targetPageId)
+      const moved = target?.blocks.find((block) => block.id === sourceImage.id)
+      return {
+        revision: document.revision,
+        sourceCount: source?.blocks.length,
+        targetCount: target?.blocks.length,
+        moved
+      }
+    })
+    .toEqual({
+      revision: beforeMove.revision + 1,
+      sourceCount: 0,
+      targetCount: 1,
+      moved: sourceImage
+    })
+
+  await page.getByRole('button', { name: '撤销' }).click()
+  await expect(sourcePreview).toHaveAttribute('aria-current', 'page')
+  await expect(image).toHaveAttribute('data-selected', 'true')
+  await expect
+    .poll(async () => {
+      const document = await readOnlyManifest(page)
+      return document.pages.find(({ id }) => id === sourcePageId)?.blocks[0]?.id
+    })
+    .toBe(sourceImage.id)
+
+  await page.getByRole('button', { name: '重做' }).click()
+  await expect(targetPreview).toHaveAttribute('aria-current', 'page')
+  await expect(image).toHaveAttribute('data-selected', 'true')
+  await expect(page.getByText('已保存', { exact: true })).toBeVisible()
+  await page.reload()
+  await expect
+    .poll(async () => {
+      const document = await readOnlyManifest(page)
+      return document.pages.find(({ id }) => id === targetPageId)?.blocks[0]?.id
+    })
+    .toBe(sourceImage.id)
 })
 
 test('浏览器离线版可导入、自由拖动、美化、自动保存、刷新恢复与打印', async ({ page }, testInfo) => {

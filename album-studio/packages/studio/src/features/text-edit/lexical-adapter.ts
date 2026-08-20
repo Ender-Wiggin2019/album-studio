@@ -14,26 +14,12 @@ import {
   type RichTextParagraphNode
 } from '@album-studio/common'
 import { createState } from 'lexical'
+import { richTextCssToFontFamily, richTextFontFamilyToCss } from './rich-text-fonts'
 
 const DEFAULT_FONT_FAMILY: RichTextFontFamily = 'sans'
 const DEFAULT_FONT_SIZE = 18
 const DEFAULT_COLOR = '#201f1b'
 export const DEFAULT_RICH_TEXT_LINE_HEIGHT = 1.5
-
-export const RICH_TEXT_FONT_FAMILY_CSS: Readonly<Record<RichTextFontFamily, string>> =
-  Object.freeze({
-    sans: "system-ui, 'PingFang SC', 'Microsoft YaHei', sans-serif",
-    serif: "'Songti SC', 'STSong', 'SimSun', serif",
-    handwritten: "'Kaiti SC', 'STKaiti', 'KaiTi', serif",
-    mono: "ui-monospace, 'SFMono-Regular', 'Cascadia Mono', monospace"
-  })
-
-const CSS_TO_FONT_FAMILY = new Map(
-  Object.entries(RICH_TEXT_FONT_FAMILY_CSS).map(([family, css]) => [
-    css,
-    RichTextFontFamilySchema.parse(family)
-  ])
-)
 
 const LINE_HEIGHT_STATE_KEY = 'albumLineHeight'
 
@@ -195,10 +181,6 @@ export const albumLineHeightState = createState(LINE_HEIGHT_STATE_KEY, {
   parse: (value) => (value === undefined ? DEFAULT_RICH_TEXT_LINE_HEIGHT : parseLineHeight(value))
 })
 
-export function richTextFontFamilyToCss(fontFamily: RichTextFontFamily): string {
-  return RICH_TEXT_FONT_FAMILY_CSS[RichTextFontFamilySchema.parse(fontFamily)]
-}
-
 export function createLexicalTextStyle({ fontFamily, fontSize, color }: ParsedTextStyle): string {
   const parsedFamily = RichTextFontFamilySchema.parse(fontFamily)
   const parsedSize = Number(fontSize)
@@ -206,7 +188,7 @@ export function createLexicalTextStyle({ fontFamily, fontSize, color }: ParsedTe
     invalid('字号必须在 8–120 之间')
   }
   const parsedColor = HexColorSchema.parse(color)
-  return `font-family: ${RICH_TEXT_FONT_FAMILY_CSS[parsedFamily]};font-size: ${parsedSize}px;color: ${parsedColor};`
+  return `font-family: ${richTextFontFamilyToCss(parsedFamily)};font-size: ${parsedSize}px;color: ${parsedColor};`
 }
 
 export function parseLexicalTextStyle(value: unknown): ParsedTextStyle {
@@ -233,8 +215,8 @@ export function parseLexicalTextStyle(value: unknown): ParsedTextStyle {
     styles.set(property, propertyValue)
   }
 
-  const fontFamily = CSS_TO_FONT_FAMILY.get(
-    styles.get('font-family') ?? RICH_TEXT_FONT_FAMILY_CSS[DEFAULT_FONT_FAMILY]
+  const fontFamily = richTextCssToFontFamily(
+    styles.get('font-family') ?? richTextFontFamilyToCss(DEFAULT_FONT_FAMILY)
   )
   if (fontFamily === undefined) invalid('文字 style 包含未受控字体')
 

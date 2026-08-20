@@ -1,7 +1,9 @@
 import {
+  mergeRecentColors,
   RICH_TEXT_FONT_FAMILIES,
   type RichTextAlignment,
-  type RichTextFontFamily
+  type RichTextFontFamily,
+  type RichTextWritingMode
 } from '@album-studio/common'
 import {
   $isListItemNode,
@@ -12,16 +14,23 @@ import {
   REMOVE_LIST_COMMAND
 } from '@lexical/list'
 import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext'
-import { $getSelectionStyleValueForProperty, $patchStyleText } from '@lexical/selection'
 import {
+  $getSelectionStyleValueForProperty,
+  $patchStyleText,
+  getCSSFromStyleObject
+} from '@lexical/selection'
+import {
+  $getRoot,
   $getSelection,
   $getState,
   $isParagraphNode,
   $isRangeSelection,
   $setSelection,
   $setState,
+  $selectAll,
   COMMAND_PRIORITY_LOW,
   FORMAT_TEXT_COMMAND,
+  getStyleObjectFromCSS,
   SELECTION_CHANGE_COMMAND,
   type LexicalNode,
   type ParagraphNode,
@@ -32,29 +41,34 @@ import {
   AlignCenterIcon,
   AlignLeftIcon,
   AlignRightIcon,
+  AlignVerticalJustifyCenterIcon,
+  AlignVerticalJustifyEndIcon,
+  AlignVerticalJustifyStartIcon,
   BoldIcon,
   ItalicIcon,
   ListIcon,
   ListOrderedIcon,
   UnderlineIcon
 } from 'lucide-react'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Input } from '@/components/ui/input'
 import {
   Select,
   SelectContent,
   SelectGroup,
   SelectItem,
+  SelectLabel,
+  SelectSeparator,
   SelectTrigger,
   SelectValue
 } from '@/components/ui/select'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
+import { DEFAULT_RICH_TEXT_LINE_HEIGHT, albumLineHeightState } from './lexical-adapter'
 import {
-  DEFAULT_RICH_TEXT_LINE_HEIGHT,
-  RICH_TEXT_FONT_FAMILY_CSS,
-  albumLineHeightState,
+  RICH_TEXT_FONT_CATALOG,
+  richTextCssToFontFamily,
   richTextFontFamilyToCss
-} from './lexical-adapter'
+} from './rich-text-fonts'
 
 type SupportedBlock = ParagraphNode | ListNode
 type SupportedListType = 'bullet' | 'number'
@@ -82,20 +96,6 @@ const DEFAULT_TOOLBAR_STATE: ToolbarState = Object.freeze({
   lineHeight: DEFAULT_RICH_TEXT_LINE_HEIGHT,
   listType: null
 })
-
-const FONT_LABELS: Readonly<Record<RichTextFontFamily, string>> = Object.freeze({
-  serif: '衬线',
-  sans: '无衬线',
-  handwritten: '手写',
-  mono: '等宽'
-})
-
-const CSS_TO_FONT_FAMILY = new Map(
-  Object.entries(RICH_TEXT_FONT_FAMILY_CSS).map(([family, css]) => [
-    css,
-    family as RichTextFontFamily
-  ])
-)
 
 function sameToolbarState(left: ToolbarState, right: ToolbarState): boolean {
   return (
@@ -140,7 +140,7 @@ function normalizeFontSize(value: string): number {
 }
 
 function normalizeColor(value: string): string {
-  return /^#[0-9a-f]{6}$/i.test(value) ? value : '#201f1b'
+  return /^#[0-9a-f]{6}$/i.test(value) ? value.toLowerCase() : '#201f1b'
 }
 
 type NumericControlProps = Readonly<{
@@ -212,52 +212,92 @@ function preserveEditorFocus(event: React.MouseEvent): void {
   event.preventDefault()
 }
 
-export function RichTextToolbar(): React.JSX.Element {
+export function RichTextToolbar({
+  recentColors = [],
+  onColorSelect,
+  editorInteracted,
+  writingMode = 'horizontal'
+}: {
+  recentColors?: readonly string[]
+  onColorSelect?: (color: string) => void
+  editorInteracted: React.RefObject<boolean>
+  writingMode?: RichTextWritingMode
+}): React.JSX.Element {
   const [editor] = useLexicalComposerContext()
   const [toolbar, setToolbar] = useState<ToolbarState>(DEFAULT_TOOLBAR_STATE)
+  const [sessionColors, setSessionColors] = useState<readonly string[]>([])
   const lastSelection = useRef<RangeSelection | null>(null)
+  const colorChoices = useMemo(
+    () => mergeRecentColors(sessionColors, recentColors),
+    [recentColors, sessionColors]
+  )
+  const StartAlignmentIcon =
+    writingMode === 'vertical' ? AlignVerticalJustifyStartIcon : AlignLeftIcon
+  const CenterAlignmentIcon =
+    writingMode === 'vertical' ? AlignVerticalJustifyCenterIcon : AlignCenterIcon
+  const EndAlignmentIcon = writingMode === 'vertical' ? AlignVerticalJustifyEndIcon : AlignRightIcon
+  const startAlignmentLabel = writingMode === 'vertical' ? '顶部对齐' : '左对齐'
+  const endAlignmentLabel = writingMode === 'vertical' ? '底部对齐' : '右对齐'
 
   const updateToolbar = useCallback(() => {
     const selection = $getSelection()
-    if (!$isRangeSelection(selection)) return
-    lastSelection.current = selection.clone()
+    const rangeSelection = $isRangeSelection(selection) ? selection : null
+    if (
+      rangeSelection &&
+      editorInteracted.current &&
+      editor.getRootElement()?.contains(globalThis.document.activeElement)
+    ) {
+      lastSelection.current = rangeSelection.clone()
+    }
 
-    const blocks = $getSelectedBlocks(selection)
-    const firstBlock = blocks[0]
-    const fontCss = $getSelectionStyleValueForProperty(
-      selection,
-      'font-family',
-      richTextFontFamilyToCss('sans')
-    )
-    const fontSizeCss = $getSelectionStyleValueForProperty(selection, 'font-size', '18px')
-    const colorCss = $getSelectionStyleValueForProperty(selection, 'color', '#201f1b')
+    const firstText = $getRoot().getAllTextNodes()[0]
+    const firstNode = firstText ?? $getRoot().getFirstChild()
+    const firstBlock = rangeSelection
+      ? $getSelectedBlocks(rangeSelection)[0]
+      : firstNode
+        ? $findSupportedBlock(firstNode)
+        : null
+    const firstTextStyle = firstText ? getStyleObjectFromCSS(firstText.getStyle()) : {}
+    const fontCss = rangeSelection
+      ? $getSelectionStyleValueForProperty(
+          rangeSelection,
+          'font-family',
+          richTextFontFamilyToCss('sans')
+        )
+      : (firstTextStyle['font-family'] ?? richTextFontFamilyToCss('sans'))
+    const fontSizeCss = rangeSelection
+      ? $getSelectionStyleValueForProperty(rangeSelection, 'font-size', '18px')
+      : (firstTextStyle['font-size'] ?? '18px')
+    const colorCss = rangeSelection
+      ? $getSelectionStyleValueForProperty(rangeSelection, 'color', '#201f1b')
+      : (firstTextStyle.color ?? '#201f1b')
     const format = firstBlock?.getFormatType()
     const currentListType = $isListNode(firstBlock) ? firstBlock.getListType() : null
     const nextState: ToolbarState = {
-      fontFamily: CSS_TO_FONT_FAMILY.get(fontCss) ?? 'sans',
+      fontFamily: richTextCssToFontFamily(fontCss) ?? 'sans',
       fontSize: normalizeFontSize(fontSizeCss),
       color: normalizeColor(colorCss),
-      bold: selection.hasFormat('bold'),
-      italic: selection.hasFormat('italic'),
-      underline: selection.hasFormat('underline'),
+      bold: rangeSelection?.hasFormat('bold') ?? firstText?.hasFormat('bold') ?? false,
+      italic: rangeSelection?.hasFormat('italic') ?? firstText?.hasFormat('italic') ?? false,
+      underline:
+        rangeSelection?.hasFormat('underline') ?? firstText?.hasFormat('underline') ?? false,
       align: format === 'center' || format === 'right' ? format : 'left',
       lineHeight:
-        firstBlock === undefined
+        firstBlock === undefined || firstBlock === null
           ? DEFAULT_RICH_TEXT_LINE_HEIGHT
           : $getState(firstBlock, albumLineHeightState),
       listType:
         currentListType === 'bullet' || currentListType === 'number' ? currentListType : null
     }
     setToolbar((current) => (sameToolbarState(current, nextState) ? current : nextState))
-  }, [])
+  }, [editor, editorInteracted])
 
-  useEffect(
-    () =>
-      editor.registerUpdateListener(({ editorState }) => {
-        editorState.read(updateToolbar)
-      }),
-    [editor, updateToolbar]
-  )
+  useEffect(() => {
+    editor.getEditorState().read(updateToolbar)
+    return editor.registerUpdateListener(({ editorState }) => {
+      editorState.read(updateToolbar)
+    })
+  }, [editor, updateToolbar])
 
   useEffect(
     () =>
@@ -273,10 +313,27 @@ export function RichTextToolbar(): React.JSX.Element {
   )
 
   const withSelection = useCallback(
-    (change: (selection: RangeSelection) => void): void => {
+    (
+      change: (selection: RangeSelection) => void,
+      changeWholeBlock?: (selection: RangeSelection) => void
+    ): void => {
       editor.update(() => {
         let selection = $getSelection()
-        if (!$isRangeSelection(selection) && lastSelection.current !== null) {
+        const editorHasFocus =
+          editor.getRootElement()?.contains(globalThis.document.activeElement) ?? false
+        if (!editorInteracted.current) {
+          const root = $getRoot()
+          const hasText = root.getTextContentSize() > 0
+          const blockSelection = hasText ? $selectAll() : root.selectEnd()
+          const applyChange = hasText ? (changeWholeBlock ?? change) : change
+          applyChange(blockSelection)
+          const changedSelection = $getSelection()
+          lastSelection.current = $isRangeSelection(changedSelection)
+            ? changedSelection.clone()
+            : blockSelection.clone()
+          return
+        }
+        if ((!$isRangeSelection(selection) || !editorHasFocus) && lastSelection.current !== null) {
           const restored = lastSelection.current.clone()
           try {
             restored.anchor.getNode()
@@ -287,17 +344,53 @@ export function RichTextToolbar(): React.JSX.Element {
             lastSelection.current = null
           }
         }
-        if ($isRangeSelection(selection)) change(selection)
+        if ($isRangeSelection(selection)) {
+          change(selection)
+          const changedSelection = $getSelection()
+          lastSelection.current = $isRangeSelection(changedSelection)
+            ? changedSelection.clone()
+            : selection.clone()
+          return
+        }
+        const root = $getRoot()
+        const hasText = root.getTextContentSize() > 0
+        const fallbackSelection = hasText ? $selectAll() : root.selectEnd()
+        const applyChange = hasText ? (changeWholeBlock ?? change) : change
+        applyChange(fallbackSelection)
+        const changedSelection = $getSelection()
+        lastSelection.current = $isRangeSelection(changedSelection)
+          ? changedSelection.clone()
+          : fallbackSelection.clone()
       })
     },
-    [editor]
+    [editor, editorInteracted]
   )
 
   const patchTextStyle = useCallback(
     (property: 'color' | 'font-family' | 'font-size', value: string): void => {
-      withSelection((selection) => $patchStyleText(selection, { [property]: value }))
+      withSelection(
+        (selection) => $patchStyleText(selection, { [property]: value }),
+        () => {
+          for (const textNode of $getRoot().getAllTextNodes()) {
+            const style = getStyleObjectFromCSS(textNode.getStyle())
+            style[property] = value
+            textNode.setStyle(getCSSFromStyleObject(style))
+          }
+        }
+      )
     },
     [withSelection]
+  )
+
+  const selectColor = useCallback(
+    (value: string): void => {
+      const color = normalizeColor(value)
+      setToolbar((current) => ({ ...current, color }))
+      setSessionColors((current) => mergeRecentColors([color], current))
+      onColorSelect?.(color)
+      patchTextStyle('color', color)
+    },
+    [onColorSelect, patchTextStyle]
   )
 
   const toggleTextFormat = useCallback(
@@ -384,14 +477,29 @@ export function RichTextToolbar(): React.JSX.Element {
         }}
         value={toolbar.fontFamily}
       >
-        <SelectTrigger aria-label="字体" className="w-28" title="字体">
+        <SelectTrigger
+          aria-label="字体"
+          className="w-32"
+          style={{ fontFamily: richTextFontFamilyToCss(toolbar.fontFamily) }}
+          title="字体"
+        >
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
           <SelectGroup>
-            {RICH_TEXT_FONT_FAMILIES.map((family) => (
-              <SelectItem key={family} value={family}>
-                {FONT_LABELS[family]}
+            <SelectLabel>特色字体</SelectLabel>
+            {RICH_TEXT_FONT_CATALOG.filter((font) => font.group === 'featured').map((font) => (
+              <SelectItem key={font.family} value={font.family}>
+                <span style={{ fontFamily: font.css }}>{font.label}</span>
+              </SelectItem>
+            ))}
+          </SelectGroup>
+          <SelectSeparator />
+          <SelectGroup>
+            <SelectLabel>系统兼容</SelectLabel>
+            {RICH_TEXT_FONT_CATALOG.filter((font) => font.group === 'compatible').map((font) => (
+              <SelectItem key={font.family} value={font.family}>
+                <span style={{ fontFamily: font.css }}>{font.label}</span>
               </SelectItem>
             ))}
           </SelectGroup>
@@ -411,11 +519,40 @@ export function RichTextToolbar(): React.JSX.Element {
       <Input
         aria-label="文字颜色"
         className="size-9 shrink-0 p-1"
-        onChange={(event) => patchTextStyle('color', event.currentTarget.value)}
+        onChange={(event) => selectColor(event.currentTarget.value)}
         title="文字颜色"
         type="color"
         value={toolbar.color}
       />
+
+      {colorChoices.length > 0 ? (
+        <div aria-label="项目颜色" className="flex items-center gap-1" role="group">
+          <span className="px-1 text-[11px] text-muted-foreground">项目颜色</span>
+          <ToggleGroup
+            aria-label="项目颜色快捷选择"
+            type="single"
+            value={colorChoices.includes(toolbar.color) ? toolbar.color : ''}
+          >
+            {colorChoices.map((color) => (
+              <ToggleGroupItem
+                aria-label={`使用项目颜色 ${color}`}
+                className="size-8 min-w-8 p-0"
+                key={color}
+                onClick={() => selectColor(color)}
+                onMouseDown={preserveEditorFocus}
+                title={color}
+                value={color}
+              >
+                <span
+                  aria-hidden="true"
+                  className="size-4 rounded-full border border-black/15 shadow-sm ring-1 ring-white/70"
+                  style={{ backgroundColor: color }}
+                />
+              </ToggleGroupItem>
+            ))}
+          </ToggleGroup>
+        </div>
+      ) : null}
 
       <ToggleGroup aria-label="文字样式" type="multiple" value={textFormats}>
         <ToggleGroupItem
@@ -452,14 +589,14 @@ export function RichTextToolbar(): React.JSX.Element {
 
       <ToggleGroup aria-label="对齐方式" type="single" value={toolbar.align}>
         <ToggleGroupItem
-          aria-label="左对齐"
+          aria-label={startAlignmentLabel}
           className="[&_svg]:size-4"
           onClick={() => setAlignment('left')}
           onMouseDown={preserveEditorFocus}
-          title="左对齐"
+          title={startAlignmentLabel}
           value="left"
         >
-          <AlignLeftIcon aria-hidden="true" data-icon="inline-start" />
+          <StartAlignmentIcon aria-hidden="true" data-icon="inline-start" />
         </ToggleGroupItem>
         <ToggleGroupItem
           aria-label="居中对齐"
@@ -469,17 +606,17 @@ export function RichTextToolbar(): React.JSX.Element {
           title="居中对齐"
           value="center"
         >
-          <AlignCenterIcon aria-hidden="true" data-icon="inline-start" />
+          <CenterAlignmentIcon aria-hidden="true" data-icon="inline-start" />
         </ToggleGroupItem>
         <ToggleGroupItem
-          aria-label="右对齐"
+          aria-label={endAlignmentLabel}
           className="[&_svg]:size-4"
           onClick={() => setAlignment('right')}
           onMouseDown={preserveEditorFocus}
-          title="右对齐"
+          title={endAlignmentLabel}
           value="right"
         >
-          <AlignRightIcon aria-hidden="true" data-icon="inline-start" />
+          <EndAlignmentIcon aria-hidden="true" data-icon="inline-start" />
         </ToggleGroupItem>
       </ToggleGroup>
 

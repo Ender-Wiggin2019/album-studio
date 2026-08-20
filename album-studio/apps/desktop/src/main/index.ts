@@ -12,6 +12,9 @@ import { handleAssetProtocol, registerPrivilegedSchemes } from './protocol/asset
 import { handleCandidateProtocol } from './protocol/candidate-protocol'
 import { buildContentSecurityPolicy } from './security/content-security-policy'
 
+const PRODUCT_NAME = '咔宝'
+app.setName(PRODUCT_NAME)
+
 const isolatedUserData = process.env.ALBUM_STUDIO_USER_DATA_DIR
 if (!app.isPackaged && isolatedUserData) app.setPath('userData', isolatedUserData)
 const development = !app.isPackaged && is.dev
@@ -30,7 +33,7 @@ function errorMessage(error: unknown): string {
 }
 
 function reportStartupFailure(summary: string, detail: string): Promise<void> {
-  console.error(`[电子相册工作室] ${summary}\n${detail}`)
+  console.error(`[${PRODUCT_NAME}] ${summary}\n${detail}`)
   if (startupFailure) return startupFailure
 
   startupFailure = (async () => {
@@ -38,7 +41,7 @@ function reportStartupFailure(summary: string, detail: string): Promise<void> {
       const fullError = `${summary}\n\n${detail}`
       const { response } = await dialog.showMessageBox({
         type: 'error',
-        title: '电子相册工作室启动失败',
+        title: `${PRODUCT_NAME}启动失败`,
         message: summary,
         detail: `${detail}\n\n请复制错误信息并发给开发人员。`,
         buttons: ['复制错误并退出', '退出'],
@@ -52,7 +55,7 @@ function reportStartupFailure(summary: string, detail: string): Promise<void> {
     for (const window of BrowserWindow.getAllWindows()) window.destroy()
     app.exit(1)
   })().catch((error) => {
-    console.error(`[电子相册工作室] 无法显示启动错误：${errorMessage(error)}`)
+    console.error(`[${PRODUCT_NAME}] 无法显示启动错误：${errorMessage(error)}`)
     app.exit(1)
   })
 
@@ -78,9 +81,9 @@ async function createWindow(): Promise<BrowserWindow> {
     minHeight: 640,
     show: false,
     autoHideMenuBar: true,
-    title: '电子相册工作室',
+    title: PRODUCT_NAME,
     backgroundColor: '#171a1f',
-    ...(process.platform === 'linux' ? { icon } : {}),
+    ...(process.platform === 'darwin' ? {} : { icon }),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       sandbox: true,
@@ -176,6 +179,7 @@ if (!app.requestSingleInstanceLock()) {
     .whenReady()
     .then(async () => {
       electronApp.setAppUserModelId('com.albumstudio.desktop')
+      if (process.platform === 'darwin') app.dock?.setIcon(icon)
       installContentSecurityPolicy()
 
       projects = new ProjectRepository()

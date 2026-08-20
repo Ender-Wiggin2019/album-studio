@@ -2,7 +2,7 @@
   "name": "album-studio-workspace",
   "version": "0.1.0",
   "private": true,
-  "description": "电子相册工作室跨平台桌面应用",
+  "description": "咔宝跨平台电子相册应用",
   "workspaces": [
     "apps/*",
     "packages/*"

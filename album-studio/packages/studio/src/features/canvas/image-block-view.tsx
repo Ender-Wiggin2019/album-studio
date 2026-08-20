@@ -11,19 +11,14 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { AssetQuality } from '@/app/platform/studio-platform'
 import { AssetImage, type AssetImageReadiness } from '@/shared/assets/asset-image'
 import { useElementSize } from '@/shared/dom/use-element-size'
+import { richTextFontFamilyToCss } from '@/features/text-edit/rich-text-fonts'
+import { richTextFontSizeToCqw } from '@/features/text-edit/rich-text-metrics'
 
-const CAPTION_FONT_FAMILY_CSS: Readonly<Record<TextStyle['fontFamily'], string>> = Object.freeze({
-  sans: "system-ui, 'PingFang SC', 'Microsoft YaHei', sans-serif",
-  serif: "'Songti SC', 'STSong', 'SimSun', serif",
-  handwritten: "'Kaiti SC', 'STKaiti', 'KaiTi', serif",
-  mono: "ui-monospace, 'SFMono-Regular', 'Cascadia Mono', monospace"
-})
-
-function captionStyle(style: TextStyle): React.CSSProperties {
+function captionStyle(style: TextStyle, pageWidthMm: number): React.CSSProperties {
   return {
     color: style.color,
-    fontFamily: CAPTION_FONT_FAMILY_CSS[style.fontFamily],
-    fontSize: `${style.fontSize / 11.22}cqw`,
+    fontFamily: richTextFontFamilyToCss(style.fontFamily),
+    fontSize: `${richTextFontSizeToCqw(style.fontSize, pageWidthMm)}cqw`,
     fontWeight: style.weight,
     lineHeight: style.lineHeight,
     textAlign: style.align
@@ -158,7 +153,7 @@ export function ImageBlockView({
           <span
             className="album-image-caption"
             data-placement="inside-bottom"
-            style={captionStyle(block.caption.style)}
+            style={captionStyle(block.caption.style, document.pageSpec.widthMm)}
           >
             {block.caption.text}
           </span>
@@ -168,7 +163,7 @@ export function ImageBlockView({
         <span
           className="album-image-caption"
           data-placement="below"
-          style={captionStyle(block.caption.style)}
+          style={captionStyle(block.caption.style, document.pageSpec.widthMm)}
         >
           {block.caption.text}
         </span>

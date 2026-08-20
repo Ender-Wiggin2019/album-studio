@@ -67,14 +67,7 @@ describe('macOS universal 原生依赖完整性', () => {
 
   it('同时验证 arm64 与 x64 的 Sharp、ORT binding 和动态库', async () => {
     const directory = await temporaryDirectory()
-    const executable = join(
-      directory,
-      'mac-universal',
-      '电子相册工作室.app',
-      'Contents',
-      'MacOS',
-      '电子相册工作室'
-    )
+    const executable = join(directory, 'mac-universal', '咔宝.app', 'Contents', 'MacOS', '咔宝')
     await touch(executable)
     const model = fixtureModel()
     const modules = await createSharedPackageFiles(
@@ -149,7 +142,7 @@ describe('macOS universal 原生依赖完整性', () => {
 describe('Windows x64 原生依赖完整性', () => {
   it('同时要求 binding、onnxruntime.dll 和共享运行时', async () => {
     const directory = await temporaryDirectory()
-    const executable = join(directory, 'win-unpacked', 'album-studio.exe')
+    const executable = join(directory, 'win-unpacked', 'kabo.exe')
     await touch(executable)
     const model = fixtureModel()
     const modules = await createSharedPackageFiles(
@@ -202,5 +195,35 @@ describe('electron-builder universal 合并规则', () => {
       true
     )
     assert.equal(matchesGlob(`${prefix}/@img/sharp-darwin-arm64/lib/sharp.node`, pattern), true)
+  })
+
+  it('显式配置咔宝品牌与同一套图标并覆盖开发态窗口与 Dock', async () => {
+    const config = await readFile(new URL('../electron-builder.yml', import.meta.url), 'utf8')
+    assert.match(config, /^productName: 咔宝$/m)
+    assert.match(config, /^ {2}executableName: kabo$/m)
+    assert.match(config, /^ {2}artifactName: kabo-\$\{version\}-setup\.\$\{ext\}$/m)
+    assert.match(config, /^ {2}artifactName: kabo-\$\{version\}\.\$\{ext\}$/m)
+    assert.match(config, /^win:\n {2}icon: build\/icon\.ico$/m)
+    assert.match(config, /^mac:\n {2}icon: build\/icon\.icns$/m)
+
+    const main = await readFile(new URL('../src/main/index.ts', import.meta.url), 'utf8')
+    assert.match(main, /process\.platform === 'darwin' \? \{\} : \{ icon \}/)
+    assert.match(main, /process\.platform === 'darwin'\) app\.dock\?\.setIcon\(icon\)/)
+
+    const runtimeIcon = await readFile(new URL('../resources/icon.png', import.meta.url))
+    assert.equal(runtimeIcon.readUInt32BE(16), 512)
+    assert.equal(runtimeIcon.readUInt32BE(20), 512)
+
+    const buildIcon = await readFile(new URL('../build/icon.png', import.meta.url))
+    assert.equal(buildIcon.readUInt32BE(16), 1024)
+    assert.equal(buildIcon.readUInt32BE(20), 1024)
+
+    const windowsIcon = await readFile(new URL('../build/icon.ico', import.meta.url))
+    assert.equal(windowsIcon.readUInt16LE(0), 0)
+    assert.equal(windowsIcon.readUInt16LE(2), 1)
+    assert.equal(windowsIcon.readUInt16LE(4), 7)
+
+    const macIcon = await readFile(new URL('../build/icon.icns', import.meta.url))
+    assert.equal(macIcon.toString('ascii', 0, 4), 'icns')
   })
 })

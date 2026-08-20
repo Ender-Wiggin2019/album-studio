@@ -1,7 +1,7 @@
 import { createAlbumDocument, type AssetRecord } from '@album-studio/common'
-import { cleanup, render, screen } from '@testing-library/react'
+import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { StudioPlatformProvider } from '@/app/platform/studio-platform-provider'
 import type { StudioPlatform } from '@/app/platform/studio-platform'
 import { useStudioStore } from '@/app/store'
@@ -20,6 +20,11 @@ const asset: AssetRecord = {
 
 let id = 0
 const nextId = (): string => `id-${++id}`
+
+beforeAll(() => {
+  Range.prototype.getBoundingClientRect = () => DOMRect.fromRect()
+  Range.prototype.getClientRects = () => [] as unknown as DOMRectList
+})
 
 function renderPanel(): ReturnType<typeof render> {
   const platform = {
@@ -115,6 +120,53 @@ describe('BlockEditPanel', () => {
       .document?.pages[1].blocks.find((candidate) => candidate.id === block.id)
     expect(updated?.type).toBe('image')
     if (updated?.type === 'image') expect(updated.caption.text).toBe('切换前未失焦的说明')
+  })
+
+  it('切换文字 Block 竖排前提交草稿并支持撤销重做', async () => {
+    const user = userEvent.setup()
+    const store = useStudioStore.getState()
+    const page = store.document?.pages[0]
+    const block = page?.blocks[0]
+    if (!page || !block || block.type !== 'rich-text') throw new Error('封面文字夹具不完整')
+    store.selectBlock(page.id, block.id)
+
+    renderPanel()
+    const editor = await screen.findByRole('textbox', { name: '富文本内容' })
+    expect(screen.getByRole('radio', { name: '横排' })).toHaveAttribute('data-state', 'on')
+    await user.type(editor, '追加')
+    await waitFor(() => expect(useStudioStore.getState().richTextDraft).not.toBeNull())
+
+    await user.click(screen.getByRole('radio', { name: '竖排' }))
+    const updated = useStudioStore
+      .getState()
+      .document?.pages[0].blocks.find((candidate) => candidate.id === block.id)
+    expect(updated?.type).toBe('rich-text')
+    if (updated?.type !== 'rich-text') throw new Error('更新后文字 Block 丢失')
+    expect((updated as unknown as { writingMode?: unknown }).writingMode).toBe('vertical')
+    expect(JSON.stringify(updated.document)).toContain('追加')
+    expect(useStudioStore.getState().richTextDraft).toBeNull()
+    expect(editor).toHaveAttribute('data-writing-mode', 'vertical')
+
+    useStudioStore.getState().undo()
+    const undone = useStudioStore
+      .getState()
+      .document?.pages[0].blocks.find((candidate) => candidate.id === block.id)
+    expect(
+      undone?.type === 'rich-text'
+        ? (undone as unknown as { writingMode?: unknown }).writingMode
+        : null
+    ).toBe('horizontal')
+    expect(undone?.type === 'rich-text' ? JSON.stringify(undone.document) : '').toContain('追加')
+
+    useStudioStore.getState().redo()
+    const redone = useStudioStore
+      .getState()
+      .document?.pages[0].blocks.find((candidate) => candidate.id === block.id)
+    expect(
+      redone?.type === 'rich-text'
+        ? (redone as unknown as { writingMode?: unknown }).writingMode
+        : null
+    ).toBe('vertical')
   })
 
   it('为图标提供颜色和保持选中的组件替换入口', async () => {

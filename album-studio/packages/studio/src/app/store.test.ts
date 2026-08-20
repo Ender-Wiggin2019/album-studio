@@ -1,4 +1,5 @@
 import {
+  AlbumCommandSchema,
   createAlbumDocument,
   createRichTextDocument,
   type AssetRecord,
@@ -115,6 +116,47 @@ describe('studio command store', () => {
     expect(useStudioStore.getState().selectedBlockId).toBeNull()
   })
 
+  it('keeps image selection on the page that owns it across move, undo and redo', () => {
+    const store = useStudioStore.getState()
+    store.dispatch({ type: 'register-assets', assets: [asset()] })
+    store.dispatch({ type: 'add-page', assetIds: ['asset-a'] })
+    store.dispatch({ type: 'add-page' })
+
+    const document = useStudioStore.getState().document
+    const source = document?.pages[1]
+    const target = document?.pages[2]
+    const image = source?.blocks[0]
+    if (!source || !target || image?.type !== 'image') {
+      throw new Error('跨页选择测试夹具不完整')
+    }
+
+    store.selectBlock(source.id, image.id)
+    store.dispatch(
+      AlbumCommandSchema.parse({
+        type: 'move-image-block-to-page',
+        sourcePageId: source.id,
+        targetPageId: target.id,
+        blockId: image.id
+      })
+    )
+    expect(useStudioStore.getState()).toMatchObject({
+      selectedPageId: target.id,
+      selectedBlockId: image.id
+    })
+
+    useStudioStore.getState().undo()
+    expect(useStudioStore.getState()).toMatchObject({
+      selectedPageId: source.id,
+      selectedBlockId: image.id
+    })
+
+    useStudioStore.getState().redo()
+    expect(useStudioStore.getState()).toMatchObject({
+      selectedPageId: target.id,
+      selectedBlockId: image.id
+    })
+  })
+
   it('opens Block editing without losing selection and restores the last persistent panel', () => {
     const { pageId, block } = coverTextBlock()
     const store = useStudioStore.getState()
@@ -184,6 +226,29 @@ describe('studio command store', () => {
     expect(state.history.past).toHaveLength(1)
     expect(state.richTextDraft).toBeNull()
     expect(JSON.stringify(committed)).toContain('最终文字')
+  })
+
+  it('persists every color picked during one rich-text draft as one undoable project palette', () => {
+    vi.useFakeTimers()
+    const { pageId, block } = coverTextBlock()
+
+    useStudioStore
+      .getState()
+      .setRichTextDraft(pageId, block.id, createRichTextDocument('红色', { color: '#c62828' }), [
+        '#c62828'
+      ])
+    useStudioStore
+      .getState()
+      .setRichTextDraft(pageId, block.id, createRichTextDocument('蓝色', { color: '#1565c0' }), [
+        '#1565c0'
+      ])
+    vi.advanceTimersByTime(650)
+
+    expect(useStudioStore.getState().document?.recentColors).toEqual(['#1565c0', '#c62828'])
+    expect(useStudioStore.getState().history.past).toHaveLength(1)
+
+    useStudioStore.getState().undo()
+    expect(useStudioStore.getState().document?.recentColors).toEqual([])
   })
 
   it('commits the latest text before preview and undo restores the previous document', () => {

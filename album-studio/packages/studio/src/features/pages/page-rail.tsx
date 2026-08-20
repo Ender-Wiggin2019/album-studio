@@ -1,7 +1,8 @@
 import type { AlbumDocument, AlbumPage } from '@album-studio/common'
-import { useDragDropMonitor } from '@dnd-kit/react'
+import { PointerActivationConstraints } from '@dnd-kit/dom'
+import { KeyboardSensor, PointerSensor, useDragDropMonitor } from '@dnd-kit/react'
 import { isSortableOperation, useSortable } from '@dnd-kit/react/sortable'
-import { GripVerticalIcon, PlusIcon, Trash2Icon } from 'lucide-react'
+import { PlusIcon, Trash2Icon } from 'lucide-react'
 import { useState } from 'react'
 import {
   AlertDialog,
@@ -15,9 +16,38 @@ import {
 } from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/shared/lib/cn'
+import { useMediaQuery } from '@/shared/dom/use-media-query'
 import { useStudioStore } from '@/app/store'
 import { AlbumPageView } from '@/features/canvas/album-page-view'
 import { buildPageReorderCommand, PAGE_SORT_TYPE, type PageSortData } from './page-sort'
+
+const REDUCED_MOTION_SORT_TRANSITION = {
+  duration: 0,
+  easing: 'linear',
+  idle: false
+} as const
+
+const PAGE_SORT_POINTER_SENSOR = PointerSensor.configure({
+  activationConstraints(event) {
+    const touch = event.pointerType === 'touch'
+    return [
+      new PointerActivationConstraints.Delay({
+        value: touch ? 250 : 200,
+        tolerance: touch ? 5 : 8
+      })
+    ]
+  }
+})
+
+const PAGE_SORT_SENSORS = [
+  PAGE_SORT_POINTER_SENSOR,
+  KeyboardSensor.configure({
+    keyboardCodes: {
+      ...KeyboardSensor.defaults.keyboardCodes,
+      start: ['Space']
+    }
+  })
+]
 
 function SortablePageItem({
   document,
@@ -26,15 +56,20 @@ function SortablePageItem({
   selected,
   richTextDraft,
   onSelect,
-  onDelete
-}: PageRailItemProps): React.JSX.Element {
-  const { ref, handleRef, isDragging, isDropTarget } = useSortable<PageSortData>({
+  onDelete,
+  onAddAfter,
+  blockDropTarget,
+  reducedMotion
+}: SortablePageItemProps): React.JSX.Element {
+  const { ref, handleRef, isDragSource } = useSortable<PageSortData>({
     id: `page-sort:${page.id}`,
     index,
     group: document.id,
     type: PAGE_SORT_TYPE,
     accept: PAGE_SORT_TYPE,
-    data: { kind: 'page-sort', pageId: page.id }
+    data: { kind: 'page-sort', pageId: page.id },
+    sensors: PAGE_SORT_SENSORS,
+    transition: reducedMotion ? REDUCED_MOTION_SORT_TRANSITION : undefined
   })
 
   return (
@@ -46,10 +81,11 @@ function SortablePageItem({
       richTextDraft={richTextDraft}
       onSelect={onSelect}
       onDelete={onDelete}
+      onAddAfter={onAddAfter}
+      blockDropTarget={blockDropTarget}
       containerRef={ref}
       handleRef={handleRef}
-      isDragging={isDragging}
-      isDropTarget={isDropTarget}
+      isDragging={isDragSource}
     />
   )
 }
@@ -62,10 +98,15 @@ interface PageRailItemProps {
   richTextDraft: ReturnType<typeof useStudioStore.getState>['richTextDraft']
   onSelect: () => void
   onDelete: () => void
+  onAddAfter: () => void
+  blockDropTarget?: boolean
   containerRef?: (element: Element | null) => void
   handleRef?: (element: Element | null) => void
   isDragging?: boolean
-  isDropTarget?: boolean
+}
+
+interface SortablePageItemProps extends PageRailItemProps {
+  reducedMotion: boolean
 }
 
 function PageRailItem({
@@ -76,50 +117,57 @@ function PageRailItem({
   richTextDraft,
   onSelect,
   onDelete,
+  onAddAfter,
+  blockDropTarget = false,
   containerRef,
   handleRef,
-  isDragging = false,
-  isDropTarget = false
+  isDragging = false
 }: PageRailItemProps): React.JSX.Element {
+  const pageName = page.kind === 'cover' ? '封面' : `第 ${index} 页`
+  const previewLabel = page.kind === 'cover' ? '封面预览' : `${pageName}预览，可拖拽排序`
+
   return (
     <div
       ref={containerRef}
       className="page-rail-item group"
       data-page-id={page.id}
       data-dragging={isDragging || undefined}
-      data-drop-target={isDropTarget || undefined}
+      data-block-drop-target={blockDropTarget || undefined}
     >
-      <button
-        type="button"
-        onClick={onSelect}
-        className={cn(
-          'page-thumbnail outline-none focus-visible:ring-2 focus-visible:ring-ring',
-          selected && 'page-thumbnail-selected'
-        )}
-        aria-current={selected ? 'page' : undefined}
-      >
-        <div className="pointer-events-none">
-          <AlbumPageView
-            document={document}
-            page={page}
-            quality="thumbnail"
-            richTextDraft={richTextDraft}
-          />
-        </div>
-      </button>
-      <div className="flex min-w-0 items-center gap-1">
-        {page.kind === 'content' ? (
-          <Button
-            ref={handleRef}
-            type="button"
-            variant="ghost"
-            size="icon-sm"
-            data-dnd-handle
-            aria-label={`拖拽排序第 ${index} 页`}
-          >
-            <GripVerticalIcon />
-          </Button>
-        ) : null}
+      <div className="page-thumbnail-shell">
+        <button
+          ref={page.kind === 'content' ? handleRef : undefined}
+          type="button"
+          onClick={onSelect}
+          className={cn(
+            'page-thumbnail outline-none focus-visible:ring-2 focus-visible:ring-ring',
+            selected && 'page-thumbnail-selected'
+          )}
+          data-dnd-handle={page.kind === 'content' || undefined}
+          aria-label={previewLabel}
+          aria-current={selected ? 'page' : undefined}
+        >
+          <div className="pointer-events-none">
+            <AlbumPageView
+              document={document}
+              page={page}
+              quality="thumbnail"
+              richTextDraft={richTextDraft}
+            />
+          </div>
+        </button>
+        <Button
+          type="button"
+          variant="outline"
+          size="icon-sm"
+          className="page-add-after-button"
+          onClick={onAddAfter}
+          aria-label={`在${pageName}后添加页面`}
+        >
+          <PlusIcon data-icon="inline-start" />
+        </Button>
+      </div>
+      <div className="page-rail-meta flex min-w-0 items-center gap-1">
         <button
           type="button"
           onClick={onSelect}
@@ -143,13 +191,18 @@ function PageRailItem({
   )
 }
 
-export function PageRail(): React.JSX.Element {
+export function PageRail({
+  blockDropTargetPageId = null
+}: {
+  blockDropTargetPageId?: string | null
+}): React.JSX.Element {
   const document = useStudioStore((state) => state.document)
   const selectedPageId = useStudioStore((state) => state.selectedPageId)
   const richTextDraft = useStudioStore((state) => state.richTextDraft)
   const selectPage = useStudioStore((state) => state.selectPage)
   const dispatch = useStudioStore((state) => state.dispatch)
   const [pendingDelete, setPendingDelete] = useState<string | null>(null)
+  const reducedMotion = useMediaQuery('(prefers-reduced-motion: reduce)')
 
   useDragDropMonitor<PageSortData>({
     onDragEnd: (event) => {
@@ -175,6 +228,12 @@ export function PageRail(): React.JSX.Element {
   })
 
   if (!document) return <aside />
+  const pageOrientation =
+    document.pageSpec.widthMm < document.pageSpec.heightMm
+      ? 'portrait'
+      : document.pageSpec.widthMm > document.pageSpec.heightMm
+        ? 'landscape'
+        : 'square'
   const addBlankPage = (afterPageId: string | undefined): void => {
     dispatch({ type: 'add-page', afterPageId })
     const pages = useStudioStore.getState().document?.pages
@@ -186,7 +245,11 @@ export function PageRail(): React.JSX.Element {
     if (pageId) selectPage(pageId)
   }
   return (
-    <aside className="page-rail border-r bg-muted/35" aria-label="相册页面">
+    <aside
+      className="page-rail border-r bg-muted/35"
+      aria-label="相册页面"
+      data-page-orientation={pageOrientation}
+    >
       <div className="page-rail-heading">
         <span>页面</span>
         <span>{document.pages.length}</span>
@@ -200,12 +263,14 @@ export function PageRail(): React.JSX.Element {
             selected: selectedPageId === page.id,
             richTextDraft,
             onSelect: () => selectPage(page.id),
-            onDelete: () => setPendingDelete(page.id)
+            onDelete: () => setPendingDelete(page.id),
+            onAddAfter: () => addBlankPage(page.id),
+            blockDropTarget: blockDropTargetPageId === page.id
           }
           return page.kind === 'cover' ? (
             <PageRailItem key={page.id} {...item} />
           ) : (
-            <SortablePageItem key={page.id} {...item} />
+            <SortablePageItem key={page.id} {...item} reducedMotion={reducedMotion} />
           )
         })}
         <Button

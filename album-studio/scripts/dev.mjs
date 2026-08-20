@@ -64,7 +64,7 @@ async function ensureDependencies() {
     (await runNpm(['ls', '--depth=0', '--silent'], 'ignore')) === 0
   if (dependencyTreeComplete) return
 
-  console.log('[电子相册工作室] 首次运行或依赖不完整，正在自动安装…')
+  console.log('[咔宝] 首次运行或依赖不完整，正在自动安装…')
   const installCode = await runNpm(['install'])
   if (installCode !== 0) {
     throw new Error(`依赖安装失败（退出码 ${installCode}）。请检查网络后重试。`)
@@ -80,8 +80,8 @@ async function main() {
   await ensureDependencies()
   console.log(
     target === 'web'
-      ? '[电子相册工作室] 正在打开浏览器调试版，保存代码后会自动刷新…'
-      : '[电子相册工作室] 正在启动桌面开发模式，保存代码后会自动刷新…'
+      ? '[咔宝] 正在打开浏览器调试版，保存代码后会自动刷新…'
+      : '[咔宝] 正在启动桌面开发模式，保存代码后会自动刷新…'
   )
   const exitCode = await runNpm(
     target === 'web' ? ['run', 'dev', '--workspace', 'album-studio-web'] : ['run', 'dev']
@@ -95,9 +95,7 @@ async function main() {
 const executedFile = process.argv[1] ? resolve(process.argv[1]) : ''
 if (executedFile === fileURLToPath(import.meta.url)) {
   main().catch((error) => {
-    console.error(
-      `[电子相册工作室] 启动失败：\n${error instanceof Error ? error.message : String(error)}`
-    )
+    console.error(`[咔宝] 启动失败：\n${error instanceof Error ? error.message : String(error)}`)
     process.exitCode = 1
   })
 }

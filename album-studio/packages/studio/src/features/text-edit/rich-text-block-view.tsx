@@ -2,33 +2,35 @@ import {
   RICH_TEXT_FORMAT_BITS,
   type AlbumTextNode,
   type RichTextDocument,
-  type RichTextFontFamily
+  type RichTextWritingMode
 } from '@album-studio/common'
+import { richTextFontFamilyToCss } from './rich-text-fonts'
+import { richTextFontSizeToCqw } from './rich-text-metrics'
+import { RICH_TEXT_WRITING_STYLES, richTextAlignmentToCss } from './rich-text-writing'
 
-const RICH_TEXT_FONT_FAMILY_CSS: Readonly<Record<RichTextFontFamily, string>> = Object.freeze({
-  sans: "system-ui, 'PingFang SC', 'Microsoft YaHei', sans-serif",
-  serif: "'Songti SC', 'STSong', 'SimSun', serif",
-  handwritten: "'Kaiti SC', 'STKaiti', 'KaiTi', serif",
-  mono: "ui-monospace, 'SFMono-Regular', 'Cascadia Mono', monospace"
-})
-
-function textNodeStyle(node: AlbumTextNode): React.CSSProperties {
+function textNodeStyle(node: AlbumTextNode, pageWidthMm: number): React.CSSProperties {
   return {
     color: node.color,
-    fontFamily: RICH_TEXT_FONT_FAMILY_CSS[node.fontFamily],
-    fontSize: `${node.fontSize / 11.22}cqw`,
+    fontFamily: richTextFontFamilyToCss(node.fontFamily),
+    fontSize: `${richTextFontSizeToCqw(node.fontSize, pageWidthMm)}cqw`,
     fontWeight: node.format & RICH_TEXT_FORMAT_BITS.bold ? 700 : 400,
     fontStyle: node.format & RICH_TEXT_FORMAT_BITS.italic ? 'italic' : 'normal',
     textDecorationLine: node.format & RICH_TEXT_FORMAT_BITS.underline ? 'underline' : 'none'
   }
 }
 
-function TextChildren({ children }: { children: AlbumTextNode[] }): React.JSX.Element {
+function TextChildren({
+  children,
+  pageWidthMm
+}: {
+  children: AlbumTextNode[]
+  pageWidthMm: number
+}): React.JSX.Element {
   if (children.length === 0) return <br />
   return (
     <>
       {children.map((node, index) => (
-        <span key={index} style={textNodeStyle(node)}>
+        <span key={index} style={textNodeStyle(node, pageWidthMm)}>
           {node.text}
         </span>
       ))}
@@ -36,28 +38,47 @@ function TextChildren({ children }: { children: AlbumTextNode[] }): React.JSX.El
   )
 }
 
-export function RichTextBlockView({ document }: { document: RichTextDocument }): React.JSX.Element {
+export function RichTextBlockView({
+  document,
+  pageWidthMm,
+  writingMode = 'horizontal'
+}: {
+  document: RichTextDocument
+  pageWidthMm: number
+  writingMode?: RichTextWritingMode
+}): React.JSX.Element {
   return (
-    <div className="album-rich-text-block" data-rich-text-version={document.version}>
+    <div
+      className="album-rich-text-block"
+      data-rich-text-version={document.version}
+      data-writing-mode={writingMode}
+      style={RICH_TEXT_WRITING_STYLES[writingMode]}
+    >
       {document.root.children.map((node, index) => {
         if (node.type === 'paragraph') {
           return (
             <p
               className="album-rich-text-paragraph"
               key={index}
-              style={{ textAlign: node.align, lineHeight: node.lineHeight }}
+              style={{
+                textAlign: richTextAlignmentToCss(writingMode, node.align),
+                lineHeight: node.lineHeight
+              }}
             >
-              <TextChildren>{node.children}</TextChildren>
+              <TextChildren pageWidthMm={pageWidthMm}>{node.children}</TextChildren>
             </p>
           )
         }
 
         const children = node.children.map((item, itemIndex) => (
           <li key={itemIndex} value={node.listType === 'number' ? item.value : undefined}>
-            <TextChildren>{item.children}</TextChildren>
+            <TextChildren pageWidthMm={pageWidthMm}>{item.children}</TextChildren>
           </li>
         ))
-        const style = { textAlign: node.align, lineHeight: node.lineHeight }
+        const style = {
+          textAlign: richTextAlignmentToCss(writingMode, node.align),
+          lineHeight: node.lineHeight
+        }
         return node.listType === 'bullet' ? (
           <ul className="album-rich-text-list" key={index} style={style}>
             {children}

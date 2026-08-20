@@ -125,6 +125,31 @@ describe('AlbumPageView', () => {
     expect(onSelectBlock).toHaveBeenNthCalledWith(2, 'block-text')
   })
 
+  it('passes rich text writing mode through the shared page rendering chain', () => {
+    const { document, page } = documentWithContentBlocks()
+    const text = page.blocks[0] as unknown as Record<string, unknown>
+    text.writingMode = 'vertical'
+
+    const pageView = render(<AlbumPageView document={document} page={page} />)
+
+    expect(pageView.container.querySelector('.album-rich-text-block')).toHaveAttribute(
+      'data-writing-mode',
+      'vertical'
+    )
+    expect(pageView.container.querySelector('.album-rich-text-block')).toHaveStyle({
+      writingMode: 'vertical-rl',
+      textOrientation: 'upright'
+    })
+
+    pageView.unmount()
+    const printView = render(<PrintBook document={document} />)
+    const printedText = printView.container.querySelector(
+      `[data-page-id="${page.id}"] .album-rich-text-block`
+    )
+    expect(printedText).toHaveAttribute('data-writing-mode', 'vertical')
+    expect(printedText).toHaveStyle({ writingMode: 'vertical-rl', textOrientation: 'upright' })
+  })
+
   it('renders a matching transient rich-text draft without mutating the document', () => {
     const { document, page } = documentWithContentBlocks()
     const persistedDocument = page.blocks[0]

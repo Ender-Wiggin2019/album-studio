@@ -32,6 +32,7 @@ import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { ThemePreviewCard } from '@/features/theme/theme-preview-card'
+import { BRAND_NAME, BRAND_SLOGAN, BrandMark } from '@/shared/brand/brand-mark'
 
 const pageSpecLabels: Record<PageSpec['presetId'], { name: string; size: string }> = {
   'a4-landscape': { name: 'A4 横向', size: '297 × 210 mm' },
@@ -115,11 +116,9 @@ export function ProjectsHome(): React.JSX.Element {
       <div className="mx-auto flex min-h-full w-full max-w-6xl flex-col px-7 py-8 lg:px-12 lg:py-12">
         <header className="flex items-center justify-between gap-4 border-b pb-6">
           <div className="flex items-center gap-3">
-            <span className="grid size-10 place-items-center rounded-lg bg-foreground text-background">
-              <ImagesIcon className="size-5" />
-            </span>
+            <BrandMark alt="" />
             <div>
-              <p className="text-base font-semibold">电子相册工作室</p>
+              <p className="text-base font-semibold">{BRAND_NAME}</p>
               <p className="text-xs text-muted-foreground">自由排版 · 安心成册</p>
             </div>
           </div>
@@ -130,9 +129,7 @@ export function ProjectsHome(): React.JSX.Element {
 
         <section className="grid items-end gap-8 py-12 md:grid-cols-[1fr_auto]">
           <div className="max-w-2xl">
-            <p className="mb-3 font-mono text-xs tracking-[0.18em] text-primary">
-              像幻灯片一样，自由摆放每张照片
-            </p>
+            <p className="mb-3 font-mono text-xs tracking-[0.18em] text-primary">{BRAND_SLOGAN}</p>
             <h1 className="text-balance text-4xl font-semibold tracking-[-0.035em] md:text-5xl">
               把散落的照片，编排成一本真正的相册。
             </h1>

@@ -51,11 +51,15 @@ describe('ProjectsHome page size selection', () => {
   it('defaults to A4 and forwards the selected physical preset when creating', async () => {
     const studioPlatform = platform()
     const user = userEvent.setup()
-    render(
+    const { container } = render(
       <StudioPlatformProvider platform={studioPlatform}>
         <ProjectsHome />
       </StudioPlatformProvider>
     )
+
+    expect(container.querySelector('header img[alt=""]')).toHaveAttribute('width', '40')
+    expect(screen.getByText('咔宝')).toBeVisible()
+    expect(screen.getByText('咔宝——翻阅时光记忆。')).toBeVisible()
 
     await user.click(screen.getByRole('button', { name: '新建相册' }))
     expect(screen.getByRole('radio', { name: /A4 横向/ })).toHaveAttribute('data-state', 'on')

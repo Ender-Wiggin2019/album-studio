@@ -74,6 +74,23 @@ afterEach(() => {
   vi.useRealTimers()
 })
 
+describe('StudioWorkspace branding', () => {
+  it('shows the compact core logo in the editor header', () => {
+    useStudioStore.getState().openDocument(createAlbumDocument({ title: '品牌测试' }))
+
+    render(
+      <StudioPlatformProvider platform={platform(vi.fn())}>
+        <TooltipProvider>
+          <StudioWorkspace />
+        </TooltipProvider>
+      </StudioPlatformProvider>
+    )
+
+    expect(screen.getByRole('img', { name: '咔宝' })).toHaveAttribute('width', '32')
+    expect(screen.queryByText('自由画布 · Everything is a Block')).not.toBeInTheDocument()
+  })
+})
+
 describe('StudioWorkspace print preparation', () => {
   it('does not call the platform exporter until the mounted PrintBook reports ready', async () => {
     const pdf = vi.fn().mockResolvedValue({ displayName: '测试.pdf' })

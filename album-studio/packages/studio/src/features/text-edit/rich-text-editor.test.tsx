@@ -30,8 +30,9 @@ describe('RichTextEditor', () => {
 
     const editor = screen.getByRole('textbox', { name: '富文本内容' })
     expect(editor).toHaveTextContent('初始文字')
+    expect(editor).toHaveAttribute('data-writing-mode', 'horizontal')
     expect(screen.getByRole('toolbar', { name: '文字格式' })).toBeInTheDocument()
-    expect(screen.getByRole('combobox', { name: '字体' })).toHaveTextContent('无衬线')
+    expect(screen.getByRole('combobox', { name: '字体' })).toHaveTextContent('黑体')
     expect(screen.getByRole('spinbutton', { name: '字号' })).toHaveAttribute('min', '8')
     expect(screen.getByRole('spinbutton', { name: '行距' })).toHaveAttribute('max', '2.5')
     expect(screen.getByRole('button', { name: '粗体' })).toHaveAttribute('title', '粗体')
@@ -48,6 +49,79 @@ describe('RichTextEditor', () => {
 
     await user.click(screen.getByText('移出焦点'))
     expect(onBlur).toHaveBeenCalledOnce()
+  })
+
+  it('edits vertical text in upright columns with top and bottom alignment labels', () => {
+    const onChange = vi.fn()
+    const props = {
+      document: createRichTextDocument('中英数123'),
+      onChange
+    }
+    const view = render(<RichTextEditor {...props} />)
+
+    const editor = screen.getByRole('textbox', { name: '富文本内容' })
+    expect(editor).toHaveAttribute('data-writing-mode', 'horizontal')
+    view.rerender(<RichTextEditor {...props} writingMode="vertical" />)
+
+    expect(editor).toHaveAttribute('data-writing-mode', 'vertical')
+    expect(editor).toHaveStyle({ writingMode: 'vertical-rl', textOrientation: 'upright' })
+    expect(editor).toHaveClass('w-full', 'min-w-0', 'max-w-full', 'overflow-x-auto')
+    expect(editor.querySelector('p')).toHaveStyle({ textAlign: 'start' })
+    expect(screen.getByRole('radio', { name: '顶部对齐' })).toBeInTheDocument()
+    expect(screen.getByRole('radio', { name: '底部对齐' })).toBeInTheDocument()
+    expect(screen.queryByRole('radio', { name: '左对齐' })).toBeNull()
+    expect(screen.queryByRole('radio', { name: '右对齐' })).toBeNull()
+  })
+
+  it('formats the whole block without an editor selection and offers project colors for reuse', async () => {
+    const user = userEvent.setup()
+    const onChange = vi.fn()
+    render(
+      <RichTextEditor
+        document={createRichTextDocument('未进入编辑状态')}
+        onChange={onChange}
+        recentColors={['#a84835', '#234f4b']}
+      />
+    )
+
+    const editor = screen.getByRole('textbox', { name: '富文本内容' })
+    expect(editor).not.toHaveFocus()
+    fireEvent.change(screen.getByRole('spinbutton', { name: '字号' }), {
+      target: { value: '36' }
+    })
+    await waitFor(() => {
+      const latest = RichTextDocumentSchema.parse(onChange.mock.lastCall?.[0])
+      const paragraph = latest.root.children[0]
+      expect(paragraph.type).toBe('paragraph')
+      if (paragraph.type === 'paragraph') {
+        expect(paragraph.children).toEqual([
+          expect.objectContaining({ text: '未进入编辑状态', fontSize: 36 })
+        ])
+      }
+    })
+
+    fireEvent.change(screen.getByLabelText('文字颜色'), { target: { value: '#c62828' } })
+    await waitFor(() => {
+      const latest = RichTextDocumentSchema.parse(onChange.mock.lastCall?.[0])
+      const paragraph = latest.root.children[0]
+      expect(paragraph.type).toBe('paragraph')
+      if (paragraph.type === 'paragraph') {
+        expect(paragraph.children).toEqual([
+          expect.objectContaining({ text: '未进入编辑状态', color: '#c62828' })
+        ])
+      }
+      expect(onChange.mock.lastCall?.[1]).toContain('#c62828')
+    })
+
+    await user.click(screen.getByRole('radio', { name: '使用项目颜色 #234f4b' }))
+    await waitFor(() => {
+      const latest = RichTextDocumentSchema.parse(onChange.mock.lastCall?.[0])
+      const paragraph = latest.root.children[0]
+      expect(paragraph.type).toBe('paragraph')
+      if (paragraph.type === 'paragraph') {
+        expect(paragraph.children[0]).toMatchObject({ color: '#234f4b' })
+      }
+    })
   })
 
   it('restores an externally changed document without echoing it back through onChange', async () => {

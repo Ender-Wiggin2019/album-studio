@@ -1,6 +1,7 @@
 import {
   applyAlbumPatches,
   executeAlbumCommands,
+  mergeRecentColors,
   type AlbumCommand,
   type AlbumDocument,
   type AlbumPatch,
@@ -22,6 +23,7 @@ export type RichTextDraft = Readonly<{
   pageId: string
   blockId: string
   document: RichTextDocument
+  usedColors?: readonly string[]
 }>
 
 type HistoryEntry = {
@@ -58,7 +60,12 @@ export type StudioState = {
   selectPage(pageId: string): void
   selectBlock(pageId: string, blockId: string): void
   clearBlockSelection(): void
-  setRichTextDraft(pageId: string, blockId: string, document: RichTextDocument): void
+  setRichTextDraft(
+    pageId: string,
+    blockId: string,
+    document: RichTextDocument,
+    usedColors?: readonly string[]
+  ): void
   commitRichTextDraft(): void
   toggleAsset(assetId: string): void
   setAssetSelection(assetIds: string[]): void
@@ -95,6 +102,25 @@ function pageAfterDelete(document: AlbumDocument, deletedPageId: string): string
   return document.pages[Math.max(0, deletedIndex - 1)]?.id ?? document.pages[0]?.id ?? null
 }
 
+function blockSelectionPatch(
+  document: AlbumDocument,
+  state: Pick<
+    StudioState,
+    'selectedBlockId' | 'lastPersistentPanelTab' | 'rightPanelTab' | 'rightPanelSheetOpen'
+  >
+): Partial<StudioState> {
+  if (!state.selectedBlockId) return {}
+  const owner = document.pages.find((page) =>
+    page.blocks.some((block) => block.id === state.selectedBlockId)
+  )
+  if (owner) return { selectedPageId: owner.id }
+  return {
+    selectedBlockId: null,
+    rightPanelTab: state.lastPersistentPanelTab,
+    rightPanelSheetOpen: false
+  }
+}
+
 const projectSaveSession = createProjectSaveSession({
   onStateChange: (snapshot) => {
     useStudioStore.setState({
@@ -122,22 +148,27 @@ export const useStudioStore = create<StudioState>((set, get) => {
 
   const dispatchMany: StudioState['dispatchMany'] = (commands) => {
     if (commands.length === 0) return
-    const current = get().document
+    const currentState = get()
+    const current = currentState.document
     if (!current) return
     const result = commandResult(current, commands)
     const last = commands.at(-1)
     const selectionPatch: Partial<StudioState> = {}
-    if (last?.type === 'delete-block' && last.blockId === get().selectedBlockId) {
+    if (last?.type === 'delete-block' && last.blockId === currentState.selectedBlockId) {
       selectionPatch.selectedBlockId = null
-      selectionPatch.rightPanelTab = get().lastPersistentPanelTab
+      selectionPatch.rightPanelTab = currentState.lastPersistentPanelTab
       selectionPatch.rightPanelSheetOpen = false
     }
     if (last?.type === 'delete-page') {
       selectionPatch.selectedPageId = pageAfterDelete(current, last.pageId)
       selectionPatch.selectedBlockId = null
-      selectionPatch.rightPanelTab = get().lastPersistentPanelTab
+      selectionPatch.rightPanelTab = currentState.lastPersistentPanelTab
       selectionPatch.rightPanelSheetOpen = false
     }
+    Object.assign(
+      selectionPatch,
+      blockSelectionPatch(result.document, { ...currentState, ...selectionPatch })
+    )
     set((state) => ({
       ...selectionPatch,
       document: result.document,
@@ -156,11 +187,15 @@ export const useStudioStore = create<StudioState>((set, get) => {
     set({ richTextDraft: null })
     const page = document.pages.find((candidate) => candidate.id === richTextDraft.pageId)
     const block = page?.blocks.find((candidate) => candidate.id === richTextDraft.blockId)
+    const usedColors = richTextDraft.usedColors ?? []
+    const paletteChanged = usedColors.some(
+      (color) => !document.recentColors.includes(color.toLowerCase())
+    )
     if (
       !page ||
       !block ||
       block.type !== 'rich-text' ||
-      richTextDocumentsEqual(block.document, richTextDraft.document)
+      (richTextDocumentsEqual(block.document, richTextDraft.document) && !paletteChanged)
     ) {
       return
     }
@@ -169,7 +204,8 @@ export const useStudioStore = create<StudioState>((set, get) => {
         type: 'update-rich-text',
         pageId: page.id,
         blockId: block.id,
-        document: richTextDraft.document
+        document: richTextDraft.document,
+        usedColors: [...usedColors]
       }
     ])
   }
@@ -280,14 +316,26 @@ export const useStudioStore = create<StudioState>((set, get) => {
       commitRichTextDraft()
       set({ selectedBlockId: null, ...restorePersistentPanel() })
     },
-    setRichTextDraft: (pageId, blockId, document) => {
+    setRichTextDraft: (pageId, blockId, document, usedColors = []) => {
       const current = get().document
       const block = current?.pages
         .find((page) => page.id === pageId)
         ?.blocks.find((candidate) => candidate.id === blockId)
       if (!block || block.type !== 'rich-text') return
       clearRichTextCommitTimer()
-      set({ richTextDraft: { pageId, blockId, document } })
+      const previousDraft = get().richTextDraft
+      const previousColors =
+        previousDraft?.pageId === pageId && previousDraft.blockId === blockId
+          ? (previousDraft.usedColors ?? [])
+          : []
+      set({
+        richTextDraft: {
+          pageId,
+          blockId,
+          document,
+          usedColors: mergeRecentColors(usedColors, previousColors)
+        }
+      })
       richTextCommitTimer = setTimeout(() => {
         richTextCommitTimer = null
         get().commitRichTextDraft()
@@ -331,6 +379,7 @@ export const useStudioStore = create<StudioState>((set, get) => {
       if (!state.document || !entry) return
       const document = applyAlbumPatches(state.document, entry.inversePatches)
       set({
+        ...blockSelectionPatch(document, state),
         document,
         history: {
           past: state.history.past.slice(0, -1),
@@ -346,6 +395,7 @@ export const useStudioStore = create<StudioState>((set, get) => {
       if (!state.document || !entry) return
       const document = applyAlbumPatches(state.document, entry.patches)
       set({
+        ...blockSelectionPatch(document, state),
         document,
         history: {
           past: [...state.history.past.slice(-99), entry],

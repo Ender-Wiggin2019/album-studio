@@ -2,9 +2,9 @@
   "name": "album-studio-desktop",
   "version": "0.1.0",
   "private": true,
-  "description": "电子相册工作室桌面应用",
+  "description": "咔宝桌面应用",
   "main": "./out/main/index.js",
-  "author": "Album Studio",
+  "author": "咔宝",
   "scripts": {
     "format": "prettier --write .",
     "download:models": "node scripts/download-models.mjs",

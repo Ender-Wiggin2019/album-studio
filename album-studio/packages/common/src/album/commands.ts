@@ -12,6 +12,7 @@ import {
 } from './create'
 import { applyImageEffectPreset, ImageEffectPresetIdSchema } from './effects'
 import { fitBlockTransformToCrop } from './crop'
+import { collectRichTextColors, mergeRecentColors } from './colors'
 import { FREE_FORM_LAYOUT_ID, getPageLayout } from './layouts'
 import {
   AlbumDocumentSchema,
@@ -25,8 +26,10 @@ import {
   ImageEffectsSchema,
   ImageEraseSchema,
   ImageMaskSchema,
+  MAX_RECENT_COLORS,
   PageLayoutIdSchema,
   RichTextDocumentSchema,
+  RichTextWritingModeSchema,
   ThemeIdSchema,
   type AlbumDocument,
   type AlbumPage,
@@ -127,6 +130,15 @@ const MoveBlockLayerCommandSchema = z
   })
   .strict()
 
+const MoveImageBlockToPageCommandSchema = z
+  .object({
+    type: z.literal('move-image-block-to-page'),
+    sourcePageId: id,
+    targetPageId: id,
+    blockId: id
+  })
+  .strict()
+
 const DuplicateBlockCommandSchema = z
   .object({ type: z.literal('duplicate-block'), pageId: id, blockId: id })
   .strict()
@@ -140,7 +152,17 @@ const UpdateRichTextCommandSchema = z
     type: z.literal('update-rich-text'),
     pageId: id,
     blockId: id,
-    document: RichTextDocumentSchema
+    document: RichTextDocumentSchema,
+    usedColors: z.array(HexColorSchema).max(MAX_RECENT_COLORS).optional()
+  })
+  .strict()
+
+const SetRichTextWritingModeCommandSchema = z
+  .object({
+    type: z.literal('set-rich-text-writing-mode'),
+    pageId: id,
+    blockId: id,
+    writingMode: RichTextWritingModeSchema
   })
   .strict()
 
@@ -236,9 +258,11 @@ export const AlbumCommandSchema = z.discriminatedUnion('type', [
   AddBlockCommandSchema,
   SetBlockTransformCommandSchema,
   MoveBlockLayerCommandSchema,
+  MoveImageBlockToPageCommandSchema,
   DuplicateBlockCommandSchema,
   DeleteBlockCommandSchema,
   UpdateRichTextCommandSchema,
+  SetRichTextWritingModeCommandSchema,
   UpdateImageEditCommandSchema,
   ApplyEffectPresetCommandSchema,
   SetImageEraseCommandSchema,
@@ -394,11 +418,7 @@ function addBlock(
   if (resolved.type !== 'decoration') page.layoutId = null
 }
 
-function applyPageLayout(
-  document: DocumentDraft,
-  page: PageDraft,
-  layoutId: PageLayoutId
-): void {
+function applyPageLayout(document: DocumentDraft, page: PageDraft, layoutId: PageLayoutId): void {
   if (layoutId === FREE_FORM_LAYOUT_ID) {
     const imageBlocks = page.blocks.filter(
       (block): block is Draft<ImageBlock> => block.type === 'image'
@@ -524,6 +544,28 @@ function applyCommand(document: DocumentDraft, command: AlbumCommand, idFactory:
       }
       return
     }
+    case 'move-image-block-to-page': {
+      if (command.sourcePageId === command.targetPageId) {
+        commandError('INVALID_TARGET', '图片只能移动到另一页')
+      }
+      const {
+        page: sourcePage,
+        block,
+        index
+      } = findBlock(document, command.sourcePageId, command.blockId)
+      if (block.type !== 'image') {
+        commandError('INVALID_TARGET', '此命令只能用于 ImageBlock')
+      }
+      const targetPage = requirePage(document, command.targetPageId)
+      if (targetPage.blocks.length >= 100) {
+        commandError('PAGE_LIMIT', '每页最多放置 100 个 Block')
+      }
+      const [image] = sourcePage.blocks.splice(index, 1)
+      targetPage.blocks.push(image)
+      sourcePage.layoutId = null
+      targetPage.layoutId = null
+      return
+    }
     case 'duplicate-block': {
       const { page, block, index } = findBlock(document, command.pageId, command.blockId)
       if (page.blocks.length >= 100) commandError('PAGE_LIMIT', '每页最多放置 100 个 Block')
@@ -546,6 +588,18 @@ function applyCommand(document: DocumentDraft, command: AlbumCommand, idFactory:
         commandError('INVALID_TARGET', '此命令只能用于 RichTextBlock')
       }
       block.document = command.document
+      document.recentColors = mergeRecentColors(
+        command.usedColors ?? collectRichTextColors(command.document),
+        document.recentColors
+      )
+      return
+    }
+    case 'set-rich-text-writing-mode': {
+      const { block } = findBlock(document, command.pageId, command.blockId)
+      if (block.type !== 'rich-text') {
+        commandError('INVALID_TARGET', '此命令只能用于 RichTextBlock')
+      }
+      block.writingMode = command.writingMode
       return
     }
     case 'update-image-edit': {
@@ -610,11 +664,7 @@ function applyCommand(document: DocumentDraft, command: AlbumCommand, idFactory:
       return
     }
     case 'apply-page-layout': {
-      applyPageLayout(
-        document,
-        requirePage(document, command.pageId),
-        command.layoutId
-      )
+      applyPageLayout(document, requirePage(document, command.pageId), command.layoutId)
       return
     }
     case 'set-theme':

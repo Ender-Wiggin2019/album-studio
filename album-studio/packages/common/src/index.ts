@@ -1,6 +1,7 @@
 export * from './album/auto-enhance'
 export * from './album/beauty'
 export * from './album/clarity'
+export * from './album/colors'
 export * from './album/commands'
 export * from './album/create'
 export * from './album/crop'

@@ -21,6 +21,7 @@ import {
   ImageEffectsSchema,
   ImageEraseSchema,
   ImageMaskSchema,
+  MAX_RECENT_COLORS,
   MAX_RICH_TEXT_CHARACTERS,
   MAX_RICH_TEXT_NODES,
   PAGE_LAYOUT_IDS,
@@ -28,6 +29,7 @@ import {
   PAGE_SPEC_PRESETS,
   PageSpecSchema,
   RichTextDocumentSchema,
+  RICH_TEXT_FONT_FAMILIES,
   STICKER_RESOURCE_IDS,
   createAlbumDocument,
   createContentPage,
@@ -119,6 +121,7 @@ describe('AlbumDocument v2 schema', () => {
       revision: 0,
       title: '夏日旅行',
       pageSpec: DEFAULT_PAGE_SPEC,
+      recentColors: [],
       assets: []
     })
     expect(document.pages).toHaveLength(1)
@@ -128,6 +131,13 @@ describe('AlbumDocument v2 schema', () => {
     expect(
       cover.blocks.map((block) => (block.type === 'rich-text' ? plainText(block.document) : ''))
     ).toEqual(['夏日旅行', '把值得记住的时刻，装订成册。', '2026.08.15'])
+    expect(
+      cover.blocks.map((block) =>
+        block.type === 'rich-text'
+          ? (block as unknown as { writingMode?: unknown }).writingMode
+          : null
+      )
+    ).toEqual(['horizontal', 'horizontal', 'horizontal'])
     expect(AlbumDocumentSchema.parse(document)).toEqual(document)
 
     const squarePreset = PAGE_SPEC_PRESETS.find((preset) => preset.presetId === 'square-12')
@@ -137,6 +147,100 @@ describe('AlbumDocument v2 schema', () => {
       idFactory()
     )
     expect(square.pageSpec).toEqual(squarePreset)
+  })
+
+  it('defaults legacy v2 rich text blocks to horizontal and strictly preserves vertical mode', () => {
+    const document = createAlbumDocument({ title: '排列方向', now: NOW }, idFactory())
+    const legacy = structuredClone(document) as unknown as {
+      pages: Array<{ blocks: Array<Record<string, unknown>> }>
+    }
+    delete legacy.pages[0].blocks[0].writingMode
+
+    const parsedLegacy = AlbumDocumentSchema.parse(legacy)
+    const legacyTitle = parsedLegacy.pages[0].blocks[0]
+    expect(
+      legacyTitle?.type === 'rich-text'
+        ? (legacyTitle as unknown as { writingMode?: unknown }).writingMode
+        : null
+    ).toBe('horizontal')
+
+    const vertical = structuredClone(document) as unknown as {
+      pages: Array<{ blocks: Array<Record<string, unknown>> }>
+    }
+    vertical.pages[0].blocks[0].writingMode = 'vertical'
+    const parsedVertical = AlbumDocumentSchema.parse(vertical)
+    const verticalTitle = parsedVertical.pages[0].blocks[0]
+    expect(
+      verticalTitle?.type === 'rich-text'
+        ? (verticalTitle as unknown as { writingMode?: unknown }).writingMode
+        : null
+    ).toBe('vertical')
+    expect(AlbumDocumentSchema.parse(JSON.parse(JSON.stringify(parsedVertical)))).toEqual(
+      parsedVertical
+    )
+
+    vertical.pages[0].blocks[0].writingMode = 'sideways'
+    expect(AlbumDocumentSchema.safeParse(vertical).success).toBe(false)
+  })
+
+  it('supports featured Chinese fonts and keeps a canonical bounded project color history', () => {
+    expect(RICH_TEXT_FONT_FAMILIES).toEqual([
+      'smiley-sans',
+      'lxgw-wenkai',
+      'lxgw-marker',
+      'xiaolai',
+      'serif',
+      'sans',
+      'handwritten',
+      'mono'
+    ])
+    for (const fontFamily of RICH_TEXT_FONT_FAMILIES) {
+      expect(
+        RichTextDocumentSchema.safeParse({
+          version: 1,
+          root: {
+            type: 'root',
+            version: 1,
+            children: [
+              {
+                type: 'paragraph',
+                version: 1,
+                align: 'left',
+                lineHeight: 1.5,
+                children: [albumText('字体预览', { fontFamily })]
+              }
+            ]
+          }
+        }).success
+      ).toBe(true)
+    }
+
+    const document = createAlbumDocument({ title: '项目色板', now: NOW }, idFactory())
+    expect(
+      AlbumDocumentSchema.parse({
+        ...document,
+        recentColors: ['#A84835', '#234F4B']
+      }).recentColors
+    ).toEqual(['#a84835', '#234f4b'])
+    expect(
+      AlbumDocumentSchema.safeParse({
+        ...document,
+        recentColors: ['#a84835', '#A84835']
+      }).success
+    ).toBe(false)
+    expect(
+      AlbumDocumentSchema.safeParse({
+        ...document,
+        recentColors: Array.from(
+          { length: MAX_RECENT_COLORS + 1 },
+          (_, index) => `#${index.toString(16).padStart(6, '0')}`
+        )
+      }).success
+    ).toBe(false)
+
+    const legacyDocument: Record<string, unknown> = structuredClone(document)
+    delete legacyDocument.recentColors
+    expect(AlbumDocumentSchema.parse(legacyDocument).recentColors).toEqual([])
   })
 
   it('uses a clean domain error for old versions and Zod errors for damaged v2 data', () => {
@@ -234,9 +338,9 @@ describe('AlbumDocument v2 schema', () => {
         beautyWhiten: -0.2
       }).success
     ).toBe(false)
-    expect(
-      ImageEffectsSchema.safeParse({ ...DEFAULT_IMAGE_EFFECTS, clarity: 1.5 }).success
-    ).toBe(false)
+    expect(ImageEffectsSchema.safeParse({ ...DEFAULT_IMAGE_EFFECTS, clarity: 1.5 }).success).toBe(
+      false
+    )
     expect(ImageMaskSchema.safeParse({ kind: 'rounded', radius: 12 }).success).toBe(false)
     expect(
       ImageCaptionSchema.safeParse({
@@ -280,13 +384,36 @@ describe('AlbumDocument v2 schema', () => {
     const erase = {
       autoDetect: true,
       strokes: [
-        { mode: 'add', size: 0.05, points: [{ x: 0.5, y: 0.5 }, { x: 0.6, y: 0.55 }] },
-        { mode: 'subtract', size: 0.03, points: [{ x: 0.5, y: 0.5 }, { x: 0.48, y: 0.52 }] }
+        {
+          mode: 'add',
+          size: 0.05,
+          points: [
+            { x: 0.5, y: 0.5 },
+            { x: 0.6, y: 0.55 }
+          ]
+        },
+        {
+          mode: 'subtract',
+          size: 0.03,
+          points: [
+            { x: 0.5, y: 0.5 },
+            { x: 0.48, y: 0.52 }
+          ]
+        }
       ]
     }
     expect(ImageEraseSchema.parse(erase)).toEqual(erase)
     expect(ErasePointSchema.parse({ x: 0, y: 1 })).toEqual({ x: 0, y: 1 })
-    expect(EraseStrokeSchema.parse({ mode: 'add', size: 1, points: [{ x: 0, y: 0 }, { x: 1, y: 1 }] })).toMatchObject({
+    expect(
+      EraseStrokeSchema.parse({
+        mode: 'add',
+        size: 1,
+        points: [
+          { x: 0, y: 0 },
+          { x: 1, y: 1 }
+        ]
+      })
+    ).toMatchObject({
       mode: 'add'
     })
 
@@ -300,13 +427,31 @@ describe('AlbumDocument v2 schema', () => {
     expect(
       ImageEraseSchema.safeParse({
         autoDetect: false,
-        strokes: [{ mode: 'add', size: 0.05, points: [{ x: 1.5, y: 0.5 }, { x: 0.6, y: 0.55 }] }]
+        strokes: [
+          {
+            mode: 'add',
+            size: 0.05,
+            points: [
+              { x: 1.5, y: 0.5 },
+              { x: 0.6, y: 0.55 }
+            ]
+          }
+        ]
       }).success
     ).toBe(false)
     expect(
       ImageEraseSchema.safeParse({
         autoDetect: false,
-        strokes: [{ mode: 'add', size: 0, points: [{ x: 0.5, y: 0.5 }, { x: 0.6, y: 0.55 }] }]
+        strokes: [
+          {
+            mode: 'add',
+            size: 0,
+            points: [
+              { x: 0.5, y: 0.5 },
+              { x: 0.6, y: 0.55 }
+            ]
+          }
+        ]
       }).success
     ).toBe(false)
     expect(
@@ -317,9 +462,9 @@ describe('AlbumDocument v2 schema', () => {
     ).toBe(false)
     // 纯自动识别（无笔划）是合法场景
     expect(ImageEraseSchema.safeParse({ autoDetect: true, strokes: [] }).success).toBe(true)
-    expect(ImageBlockSchema.safeParse({ ...block, erase: { autoDetect: true, extra: 1 } }).success).toBe(
-      false
-    )
+    expect(
+      ImageBlockSchema.safeParse({ ...block, erase: { autoDetect: true, extra: 1 } }).success
+    ).toBe(false)
   })
 
   it('enforces normalized page geometry for every block and layout slot', () => {
@@ -621,11 +766,7 @@ describe('AlbumDocument v2 schema', () => {
     const page = createContentPage(ids)
     page.layoutId = FREE_FORM_LAYOUT_ID
     page.blocks.push(
-      createImageBlock(
-        'asset-1',
-        { x: 0.1, y: 0.1, width: 0.42, height: 0.3, rotationDeg: 0 },
-        ids
-      )
+      createImageBlock('asset-1', { x: 0.1, y: 0.1, width: 0.42, height: 0.3, rotationDeg: 0 }, ids)
     )
     document.pages.push(page)
     expect(AlbumDocumentSchema.parse(document)).toEqual(document)

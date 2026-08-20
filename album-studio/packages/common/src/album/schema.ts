@@ -211,13 +211,38 @@ export type ImageErase = z.infer<typeof ImageEraseSchema>
 export const HexColorSchema = z.string().regex(/^#[0-9a-f]{6}$/i)
 export type HexColor = z.infer<typeof HexColorSchema>
 
-export const RICH_TEXT_FONT_FAMILIES = ['serif', 'sans', 'handwritten', 'mono'] as const
+export const MAX_RECENT_COLORS = 8
+const CanonicalHexColorSchema = HexColorSchema.transform((color) => color.toLowerCase())
+export const RecentColorsSchema = z
+  .array(CanonicalHexColorSchema)
+  .max(MAX_RECENT_COLORS)
+  .superRefine((colors, context) => {
+    if (new Set(colors).size !== colors.length) {
+      context.addIssue({ code: 'custom', message: '项目颜色不能重复' })
+    }
+  })
+  .default([])
+
+export const RICH_TEXT_FONT_FAMILIES = [
+  'smiley-sans',
+  'lxgw-wenkai',
+  'lxgw-marker',
+  'xiaolai',
+  'serif',
+  'sans',
+  'handwritten',
+  'mono'
+] as const
 export const RichTextFontFamilySchema = z.enum(RICH_TEXT_FONT_FAMILIES)
 export type RichTextFontFamily = z.infer<typeof RichTextFontFamilySchema>
 
 export const RICH_TEXT_ALIGNMENTS = ['left', 'center', 'right'] as const
 export const RichTextAlignmentSchema = z.enum(RICH_TEXT_ALIGNMENTS)
 export type RichTextAlignment = z.infer<typeof RichTextAlignmentSchema>
+
+export const RICH_TEXT_WRITING_MODES = ['horizontal', 'vertical'] as const
+export const RichTextWritingModeSchema = z.enum(RICH_TEXT_WRITING_MODES)
+export type RichTextWritingMode = z.infer<typeof RichTextWritingModeSchema>
 
 export const RICH_TEXT_FORMAT_BITS = Object.freeze({
   bold: 1,
@@ -388,6 +413,7 @@ export const RichTextBlockSchema = z
   .object({
     ...BlockBaseShape,
     type: z.literal('rich-text'),
+    writingMode: RichTextWritingModeSchema.default('horizontal'),
     document: RichTextDocumentSchema
   })
   .strict()
@@ -513,6 +539,7 @@ export const AlbumDocumentSchema = z
     updatedAt: z.string().datetime(),
     themeId: ThemeIdSchema,
     pageSpec: PageSpecSchema,
+    recentColors: RecentColorsSchema,
     assets: z.array(AssetRecordSchema),
     pages: z.array(AlbumPageSchema).min(1)
   })

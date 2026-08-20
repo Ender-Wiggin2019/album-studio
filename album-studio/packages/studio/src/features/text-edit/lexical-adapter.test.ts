@@ -28,7 +28,7 @@ const document = {
             version: 1,
             text: '春日相册',
             format: RICH_TEXT_FORMAT_BITS.bold | RICH_TEXT_FORMAT_BITS.italic,
-            fontFamily: 'serif',
+            fontFamily: 'smiley-sans',
             fontSize: 32,
             color: '#6f4c35'
           },

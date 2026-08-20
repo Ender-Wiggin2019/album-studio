@@ -40,6 +40,18 @@ function clampedTransform(transform: BlockTransform): BlockTransform {
   }
 }
 
+function pageRailHitAtPoint(
+  ownerDocument: Document,
+  clientX: number,
+  clientY: number
+): { pageId: string | null } | null {
+  const element = ownerDocument.elementFromPoint(clientX, clientY)
+  if (!element?.closest('.page-rail')) return null
+  return {
+    pageId: element.closest<HTMLElement>('.page-rail-item[data-page-id]')?.dataset.pageId ?? null
+  }
+}
+
 export function EditorWorkspace(): React.JSX.Element {
   const document = useStudioStore((state) => state.document)
   const selectedPageId = useStudioStore((state) => state.selectedPageId)
@@ -56,6 +68,7 @@ export function EditorWorkspace(): React.JSX.Element {
   const sheetRef = useRef<HTMLDivElement>(null)
   const gestureRef = useRef<BlockTransform | null>(null)
   const [zoom, setZoom] = useState(1)
+  const [blockDropTargetPageId, setBlockDropTargetPageId] = useState<string | null>(null)
   const [scrollElement, setScrollElement] = useState<HTMLDivElement | null>(null)
   const availableCanvasSize = useElementContentSize(scrollElement)
   const page =
@@ -122,9 +135,15 @@ export function EditorWorkspace(): React.JSX.Element {
     })
   }
 
+  const validImageMoveTarget = (pageId: string | null): string | null => {
+    if (!pageId || pageId === page.id) return null
+    const targetPage = document.pages.find((candidate) => candidate.id === pageId)
+    return targetPage && targetPage.blocks.length < 100 ? targetPage.id : null
+  }
+
   return (
     <div className="editor-layout min-h-0 flex-1">
-      <PageRail />
+      <PageRail blockDropTargetPageId={blockDropTargetPageId} />
       <section className="canvas-workspace" aria-label="相册画布">
         <div className="canvas-toolbar">
           <span className="text-xs text-muted-foreground">
@@ -216,7 +235,9 @@ export function EditorWorkspace(): React.JSX.Element {
               selectedBlockId={selectedBlockId}
               richTextDraft={richTextDraft}
               showSafeArea
-              onSelectBlock={(blockId) => selectBlock(page.id, blockId)}
+              onSelectBlock={(blockId) => {
+                if (selectedBlockId !== blockId) selectBlock(page.id, blockId)
+              }}
               onSourceError={(blockId) => {
                 const failedBlock = page.blocks.find((candidate) => candidate.id === blockId)
                 if (failedBlock?.type === 'image') markAssetMissing(failedBlock.assetId)
@@ -245,10 +266,22 @@ export function EditorWorkspace(): React.JSX.Element {
                 onDragStart={(event) => {
                   event.set([0, 0])
                   gestureRef.current = { ...block.transform }
+                  setBlockDropTargetPageId(null)
                 }}
                 onDrag={(event) => {
                   const size = pageSize()
                   if (!size) return
+                  if (block.type === 'image') {
+                    const hit = pageRailHitAtPoint(
+                      event.target.ownerDocument,
+                      event.clientX,
+                      event.clientY
+                    )
+                    const targetPageId = validImageMoveTarget(hit?.pageId ?? null)
+                    setBlockDropTargetPageId((current) =>
+                      current === targetPageId ? current : targetPageId
+                    )
+                  }
                   previewTransform(
                     event.target,
                     clampedTransform({
@@ -258,7 +291,28 @@ export function EditorWorkspace(): React.JSX.Element {
                     })
                   )
                 }}
-                onDragEnd={commitGesture}
+                onDragEnd={(event) => {
+                  const hit =
+                    block.type === 'image'
+                      ? pageRailHitAtPoint(event.target.ownerDocument, event.clientX, event.clientY)
+                      : null
+                  const targetPageId = validImageMoveTarget(hit?.pageId ?? null)
+                  setBlockDropTargetPageId(null)
+                  if (block.type === 'image' && hit) {
+                    previewTransform(event.target, block.transform)
+                    gestureRef.current = null
+                    if (event.isDrag && targetPageId) {
+                      dispatch({
+                        type: 'move-image-block-to-page',
+                        sourcePageId: page.id,
+                        targetPageId,
+                        blockId: block.id
+                      })
+                    }
+                    return
+                  }
+                  commitGesture()
+                }}
                 onResizeStart={(event) => {
                   const resizeTarget = event.target as HTMLElement
                   event.set([resizeTarget.offsetWidth, resizeTarget.offsetHeight])

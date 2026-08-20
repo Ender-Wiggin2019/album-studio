@@ -75,8 +75,7 @@ export function fitImageBlockSize(input: {
   ) {
     throw new Error('图片与页面尺寸必须为正数。')
   }
-  const ratio =
-    (input.assetWidth / input.assetHeight) * (input.pageHeightMm / input.pageWidthMm)
+  const ratio = (input.assetWidth / input.assetHeight) * (input.pageHeightMm / input.pageWidthMm)
   if (ratio >= maxWidth / maxHeight) {
     return { width: maxWidth, height: maxWidth / ratio }
   }
@@ -256,6 +255,7 @@ export function createRichTextBlock(
     id: idFactory(),
     type: 'rich-text',
     transform: cloneTransform(transform),
+    writingMode: 'horizontal',
     document: RichTextDocumentSchema.parse(document)
   }
 }
@@ -325,6 +325,7 @@ export function createAlbumDocument(
     updatedAt: now,
     themeId: input.themeId ?? 'journal',
     pageSpec: { ...(input.pageSpec ?? DEFAULT_PAGE_SPEC) },
+    recentColors: [],
     assets: [],
     pages: [
       {

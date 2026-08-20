@@ -27,6 +27,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { BlockPlacementDragDropProvider } from '@/features/block-placement/drag-drop-provider'
 import { PrintBook, type PrintBookReadyResult } from '@/features/canvas/album-page-view'
 import { PreviewWorkspace } from '@/features/preview/preview-workspace'
+import { BRAND_NAME, BrandMark } from '@/shared/brand/brand-mark'
 import { shouldIgnoreStudioShortcut } from './studio-keyboard'
 import { waitForPrintReadiness } from './print-readiness'
 
@@ -243,6 +244,14 @@ export function StudioWorkspace(): React.JSX.Element {
     }
   }
 
+  if (exclusiveWorkspace === 'preview') {
+    return (
+      <div className="app-shell flex h-dvh flex-col overflow-hidden">
+        <PreviewWorkspace />
+      </div>
+    )
+  }
+
   if (exclusiveWorkspace === 'erase-people' || exclusiveWorkspace === 'image-edit') {
     return (
       <div className="app-shell flex h-dvh flex-col overflow-hidden">
@@ -276,13 +285,11 @@ export function StudioWorkspace(): React.JSX.Element {
               </TooltipTrigger>
               <TooltipContent>保存并返回项目首页</TooltipContent>
             </Tooltip>
+            <BrandMark alt={BRAND_NAME} variant="compact" />
             <div className="project-identity min-w-0">
               <p className="truncate text-sm font-semibold">{document.title}</p>
               <SaveIndicator />
             </div>
-          </div>
-          <div className="studio-context" aria-hidden="true">
-            自由画布 · Everything is a Block
           </div>
           <div className="studio-actions">
             <div className="history-actions">
@@ -339,15 +346,11 @@ export function StudioWorkspace(): React.JSX.Element {
             </Tooltip>
           </div>
         </header>
-        {exclusiveWorkspace === 'preview' ? (
-          <PreviewWorkspace />
-        ) : (
-          <Suspense fallback={<WorkspaceLoading />}>
-            <BlockPlacementDragDropProvider>
-              <EditorWorkspace />
-            </BlockPlacementDragDropProvider>
-          </Suspense>
-        )}
+        <Suspense fallback={<WorkspaceLoading />}>
+          <BlockPlacementDragDropProvider>
+            <EditorWorkspace />
+          </BlockPlacementDragDropProvider>
+        </Suspense>
       </div>
       {printDocument ? (
         <PrintBook document={printDocument} onReady={(result) => printReadyRef.current?.(result)} />

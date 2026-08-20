@@ -142,7 +142,13 @@ describe('AlbumDocument command interface', () => {
         type: 'register-assets',
         assets: [
           { ...assets(1)[0], contentHash: 'a'.repeat(64), width: 3_000, height: 4_000 },
-          { ...assets(2)[0], id: 'asset-2', contentHash: 'b'.repeat(64), width: 4_000, height: 2_250 }
+          {
+            ...assets(2)[0],
+            id: 'asset-2',
+            contentHash: 'b'.repeat(64),
+            width: 4_000,
+            height: 2_250
+          }
         ]
       },
       ids
@@ -212,7 +218,8 @@ describe('AlbumDocument command interface', () => {
     const block = contentPage(result).blocks[0]
     if (block.type !== 'image') throw new Error('测试夹具不是图片 Block')
     const asset = result.assets[0]
-    const ratio = (asset.width / asset.height) * (result.pageSpec.heightMm / result.pageSpec.widthMm)
+    const ratio =
+      (asset.width / asset.height) * (result.pageSpec.heightMm / result.pageSpec.widthMm)
 
     expect(block.transform).toMatchObject({ x: 0.1, y: 0.12, width: 0.42, rotationDeg: 0 })
     expect(block.transform.height).toBeCloseTo(0.42 / ratio, 6)
@@ -358,6 +365,125 @@ describe('AlbumDocument command interface', () => {
     expect(deleted.revision).toBe(mixed.revision + 4)
   })
 
+  it('moves an image block between pages as one undoable command without changing its content', () => {
+    const { document, ids } = seededDocument(2)
+    const withSource = run(
+      document,
+      { type: 'add-page', assetIds: ['asset-1'], layoutId: 'focus' },
+      ids
+    ).document
+    const withTarget = run(
+      withSource,
+      { type: 'add-page', assetIds: ['asset-2'], layoutId: 'focus' },
+      ids,
+      2
+    ).document
+    const source = withTarget.pages[1]
+    const target = withTarget.pages[2]
+    const image = source.blocks[0]
+    if (!source || !target || image?.type !== 'image') {
+      throw new Error('跨页移动测试夹具不完整')
+    }
+    const original = structuredClone(image)
+    const commandInput = {
+      type: 'move-image-block-to-page',
+      sourcePageId: source.id,
+      targetPageId: target.id,
+      blockId: image.id
+    } as const
+
+    expect(AlbumCommandSchema.safeParse(commandInput).success).toBe(true)
+    const result = run(withTarget, AlbumCommandSchema.parse(commandInput), ids, 3)
+    const movedSource = result.document.pages[1]
+    const movedTarget = result.document.pages[2]
+
+    expect(movedSource.blocks).toEqual([])
+    expect(movedTarget.blocks.at(-1)).toEqual(original)
+    expect(movedSource.layoutId).toBeNull()
+    expect(movedTarget.layoutId).toBeNull()
+    expect(result.document.revision).toBe(withTarget.revision + 1)
+
+    const undone = applyAlbumPatches(result.document, result.inversePatches)
+    expect(undone.pages[1].blocks).toEqual(withTarget.pages[1].blocks)
+    expect(undone.pages[2].blocks).toEqual(withTarget.pages[2].blocks)
+    expect(undone.pages[1].layoutId).toBe('focus')
+    expect(undone.pages[2].layoutId).toBe('focus')
+  })
+
+  it('rejects moving an image to the same page or moving a non-image block', () => {
+    const { document, ids } = seededDocument(1)
+    const withPage = run(document, { type: 'add-page', assetIds: ['asset-1'] }, ids).document
+    const source = withPage.pages[1]
+    const image = source.blocks[0]
+    const coverText = withPage.pages[0].blocks[0]
+    if (!source || image?.type !== 'image' || coverText?.type !== 'rich-text') {
+      throw new Error('跨页移动拒绝测试夹具不完整')
+    }
+
+    expect(() =>
+      run(
+        withPage,
+        AlbumCommandSchema.parse({
+          type: 'move-image-block-to-page',
+          sourcePageId: source.id,
+          targetPageId: source.id,
+          blockId: image.id
+        }),
+        ids,
+        2
+      )
+    ).toThrowError(/另一页/)
+    expect(() =>
+      run(
+        withPage,
+        AlbumCommandSchema.parse({
+          type: 'move-image-block-to-page',
+          sourcePageId: withPage.pages[0].id,
+          targetPageId: source.id,
+          blockId: coverText.id
+        }),
+        ids,
+        3
+      )
+    ).toThrowError(/ImageBlock/)
+  })
+
+  it('does not move an image into a page that already has 100 blocks', () => {
+    const { document, ids } = seededDocument(1)
+    const withSource = run(document, { type: 'add-page', assetIds: ['asset-1'] }, ids).document
+    const withTarget = run(withSource, { type: 'add-page' }, ids, 2).document
+    const source = withTarget.pages[1]
+    const target = withTarget.pages[2]
+    const image = source.blocks[0]
+    if (!source || !target || image?.type !== 'image') {
+      throw new Error('页面上限测试夹具不完整')
+    }
+    const full = executeAlbumCommands(
+      withTarget,
+      Array.from({ length: 100 }, () => ({
+        type: 'add-block' as const,
+        pageId: target.id,
+        block: { type: 'image' as const, assetId: 'asset-1' }
+      })),
+      { idFactory: ids, now: '2026-08-15T12:03:00.000Z' }
+    ).document
+
+    expect(full.pages[2].blocks).toHaveLength(100)
+    expect(() =>
+      run(
+        full,
+        {
+          type: 'move-image-block-to-page',
+          sourcePageId: source.id,
+          targetPageId: target.id,
+          blockId: image.id
+        },
+        ids,
+        4
+      )
+    ).toThrowError(/100/)
+  })
+
   it('updates rich text atomically and rejects non-rich-text targets', () => {
     const { document, ids } = seededDocument(1)
     const withPage = run(document, { type: 'add-page', assetIds: ['asset-1'] }, ids).document
@@ -372,20 +498,33 @@ describe('AlbumDocument command interface', () => {
       ids
     ).document
     const [image, text] = contentPage(withText).blocks
-    const replacement = createRichTextDocument('新的段落', { format: 1, align: 'center' })
-    const updated = run(
+    const replacement = createRichTextDocument('新的段落', {
+      format: 1,
+      align: 'center',
+      color: '#c62828'
+    })
+    const updateResult = run(
       withText,
-      { type: 'update-rich-text', pageId, blockId: text.id, document: replacement },
+      {
+        type: 'update-rich-text',
+        pageId,
+        blockId: text.id,
+        document: replacement,
+        usedColors: ['#1565c0', '#c62828']
+      },
       ids,
       2
-    ).document
+    )
+    const updated = updateResult.document
 
     expect(contentPage(updated).blocks[1]).toMatchObject({
       id: text.id,
       type: 'rich-text',
       document: replacement
     })
+    expect(updated.recentColors).toEqual(['#1565c0', '#c62828'])
     expect(updated.revision).toBe(withText.revision + 1)
+    expect(applyAlbumPatches(updated, updateResult.inversePatches).recentColors).toEqual([])
     expect(() =>
       run(
         updated,
@@ -393,6 +532,63 @@ describe('AlbumDocument command interface', () => {
         ids,
         3
       )
+    ).toThrowError(/RichTextBlock/)
+  })
+
+  it('sets rich text writing mode as one undoable command and preserves it when duplicating', () => {
+    const { document, ids } = seededDocument(1)
+    const withPage = run(document, { type: 'add-page', assetIds: ['asset-1'] }, ids).document
+    const pageId = contentPage(withPage).id
+    const withText = run(
+      withPage,
+      {
+        type: 'add-block',
+        pageId,
+        block: { type: 'rich-text', document: createRichTextDocument('竖排文字') }
+      },
+      ids
+    ).document
+    const [image, text] = contentPage(withText).blocks
+    const setVertical = {
+      type: 'set-rich-text-writing-mode',
+      pageId,
+      blockId: text.id,
+      writingMode: 'vertical'
+    } as const
+
+    expect(AlbumCommandSchema.safeParse(setVertical).success).toBe(true)
+    const result = run(withText, setVertical as unknown as AlbumCommand, ids, 2)
+    const updated = contentPage(result.document).blocks[1]
+    expect(
+      updated?.type === 'rich-text'
+        ? (updated as unknown as { writingMode?: unknown }).writingMode
+        : null
+    ).toBe('vertical')
+    expect(result.document.revision).toBe(withText.revision + 1)
+
+    const restored = applyAlbumPatches(result.document, result.inversePatches)
+    const restoredText = contentPage(restored).blocks[1]
+    expect(
+      restoredText?.type === 'rich-text'
+        ? (restoredText as unknown as { writingMode?: unknown }).writingMode
+        : null
+    ).toBe('horizontal')
+
+    const duplicated = run(
+      result.document,
+      { type: 'duplicate-block', pageId, blockId: text.id },
+      ids,
+      3
+    ).document
+    const duplicate = contentPage(duplicated).blocks[2]
+    expect(
+      duplicate?.type === 'rich-text'
+        ? (duplicate as unknown as { writingMode?: unknown }).writingMode
+        : null
+    ).toBe('vertical')
+
+    expect(() =>
+      run(result.document, { ...setVertical, blockId: image.id } as unknown as AlbumCommand, ids, 4)
     ).toThrowError(/RichTextBlock/)
   })
 
@@ -515,7 +711,12 @@ describe('AlbumDocument command interface', () => {
         type: 'update-image-edit',
         pageId: page.id,
         blockId,
-        crop: { area: { x: 0, y: 0, width: 75, height: 100 }, rotationDeg: 0, flipX: false, flipY: false }
+        crop: {
+          area: { x: 0, y: 0, width: 75, height: 100 },
+          rotationDeg: 0,
+          flipX: false,
+          flipY: false
+        }
       },
       ids,
       2
@@ -523,9 +724,10 @@ describe('AlbumDocument command interface', () => {
     const editedBlock = contentPage(edited).blocks[0]
     if (editedBlock.type !== 'image') throw new Error('expected image block')
     // 页面为 A4 横向（297×210），Block 视觉宽高比应为 1:1
-    expect(
-      (editedBlock.transform.width * 297) / (editedBlock.transform.height * 210)
-    ).toBeCloseTo(1, 6)
+    expect((editedBlock.transform.width * 297) / (editedBlock.transform.height * 210)).toBeCloseTo(
+      1,
+      6
+    )
     expect(editedBlock.transform.x + editedBlock.transform.width / 2).toBeCloseTo(centerX, 9)
     expect(editedBlock.transform.y + editedBlock.transform.height / 2).toBeCloseTo(centerY, 9)
     expect(editedBlock.transform.width * editedBlock.transform.height).toBeCloseTo(
@@ -872,11 +1074,21 @@ describe('AlbumDocument command interface', () => {
     const erase = {
       autoDetect: true,
       strokes: [
-        { mode: 'add' as const, size: 0.04, points: [{ x: 0.5, y: 0.5 }, { x: 0.55, y: 0.6 }] },
+        {
+          mode: 'add' as const,
+          size: 0.04,
+          points: [
+            { x: 0.5, y: 0.5 },
+            { x: 0.55, y: 0.6 }
+          ]
+        },
         {
           mode: 'subtract' as const,
           size: 0.03,
-          points: [{ x: 0.5, y: 0.5 }, { x: 0.48, y: 0.52 }]
+          points: [
+            { x: 0.5, y: 0.5 },
+            { x: 0.48, y: 0.52 }
+          ]
         }
       ]
     }

@@ -68,7 +68,11 @@ export function BlockView({
           onPrintReadinessChange={onPrintReadinessChange}
         />
       ) : block.type === 'rich-text' ? (
-        <RichTextBlockView document={block.document} />
+        <RichTextBlockView
+          document={block.document}
+          pageWidthMm={document.pageSpec.widthMm}
+          writingMode={block.writingMode}
+        />
       ) : (
         <DecorationBlockView block={block} />
       )}

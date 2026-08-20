@@ -27,26 +27,19 @@ async function findPackagedExecutable() {
   }
 
   if (process.platform === 'win32') {
-    const executable = join(distRoot, 'win-unpacked', 'album-studio.exe')
+    const executable = join(distRoot, 'win-unpacked', 'kabo.exe')
     await access(executable)
     return executable
   }
 
   if (process.platform === 'darwin') {
-    const productName = '电子相册工作室.app'
+    const productName = '咔宝.app'
     const outputDirectories = (await readdir(distRoot, { withFileTypes: true }))
       .filter((entry) => entry.isDirectory() && entry.name.startsWith('mac'))
       .map((entry) => entry.name)
     const candidates = []
     for (const directory of outputDirectories) {
-      const executable = join(
-        distRoot,
-        directory,
-        productName,
-        'Contents',
-        'MacOS',
-        '电子相册工作室'
-      )
+      const executable = join(distRoot, directory, productName, 'Contents', 'MacOS', '咔宝')
       try {
         const appAsar = join(distRoot, directory, productName, 'Contents', 'Resources', 'app.asar')
         candidates.push({ executable, modifiedAt: (await stat(appAsar)).mtimeMs })
@@ -108,7 +101,7 @@ async function verifyPackagedRenderer() {
       .querySelector('meta[http-equiv="Content-Security-Policy"]')
       ?.getAttribute('content')
   }))
-  if (readiness.title !== '电子相册工作室') throw new Error(`应用标题异常：${readiness.title}`)
+  if (readiness.title !== '咔宝') throw new Error(`应用标题异常：${readiness.title}`)
   if (readiness.rootChildren < 1) throw new Error('打包应用的 React 没有挂载到 #root。')
   if (!readiness.hasPreload) throw new Error('打包应用的 window.albumStudio preload API 不可用。')
   if (!readiness.csp?.includes("script-src 'self'")) {
